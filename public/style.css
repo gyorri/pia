@@ -144,6 +144,166 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Ar
 /* v0.3.8: stable mobile back icon and authenticated timeline management */
 .top-title{min-width:0}.top-title>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.top-back{flex:0 0 34px;display:inline-flex;align-items:center;justify-content:center;text-decoration:none!important;font-size:0!important;line-height:1!important}.top-back svg{display:block;flex:none;width:22px;height:22px}.tweet-more{border:0;background:transparent;padding:5px;cursor:pointer;border-radius:50%;display:none;align-items:center;justify-content:center;flex:0 0 auto}.pia-admin-session .tweet-more{display:inline-flex}.tweet-more:hover{background:#eff3f4}.pia-manage-overlay{position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px}.pia-manage-dialog{width:min(100%,530px);max-height:90dvh;overflow-y:auto;background:#fff;color:#0f1419;border-radius:16px;padding:20px;box-shadow:0 16px 48px #0003}.pia-manage-head{display:flex;justify-content:space-between;align-items:center;font-size:20px;margin-bottom:15px}.pia-manage-head button{background:transparent;border:0;font-size:20px;cursor:pointer}.pia-manage-dialog form{display:grid;gap:13px}.pia-manage-dialog label{display:grid;gap:5px;font-size:14px;font-weight:600}.pia-manage-dialog input:not([type=checkbox]),.pia-manage-dialog select,.pia-manage-dialog textarea{width:100%;min-width:0;box-sizing:border-box;padding:11px;border:1px solid #cfd9de;border-radius:8px;font:inherit;color:#0f1419;background:white}.pia-review-check{display:flex!important;align-items:center;flex-direction:row;gap:8px}.pia-manage-note{font-size:12px;color:#536471}.pia-manage-actions{display:flex;justify-content:space-between;gap:12px}.pia-manage-actions button{border:0;border-radius:22px;padding:11px 18px;font-weight:700;cursor:pointer}.pia-delete{color:#c62828;background:#ffeaea}.pia-save{color:white;background:#0f1419}.pia-manage-message{font-size:13px;color:#b42318;min-height:1em}@media(max-width:600px){.top-title{gap:12px}.top-back{width:30px;flex-basis:30px}.pia-manage-dialog{padding:16px}.tweet-more{padding:3px}}
 
+
 /* Keep the date review checkbox and caption together in post edit dialogs. */
 .pia-manage-dialog label.pia-review-check{display:inline-flex!important;flex-direction:row!important;align-items:center!important;justify-content:flex-start;gap:8px;width:fit-content;max-width:100%;white-space:normal;line-height:1.45}
 .pia-manage-dialog .pia-review-check input[type=checkbox]{display:block;flex:0 0 16px;width:16px;height:16px;margin:0}
+
+/* v0.3.20 — X-style public UI alignment, scoped to public surfaces.
+   All interaction logic still uses the existing archive/data flows. */
+:root{--pia-x-text:#0f1419;--pia-x-muted:#536471;--pia-x-line:#eff3f4;--pia-x-blue:#1d9bf0;--pia-x-green:#00ba7c;--pia-x-pink:#f91880;--pia-x-hover:#f7f9f9}
+.shell{max-width:1265px;grid-template-columns:275px minmax(0,600px) minmax(280px,350px);color:var(--pia-x-text)}
+.shell .center{min-width:0;border-left:1px solid var(--pia-x-line);border-right:1px solid var(--pia-x-line)}
+.shell .left{padding:0 16px 16px 8px}
+.shell .logo{width:60px;height:58px;padding:12px 17px;font-size:30px;line-height:1.15;color:#0f1419;font-weight:750}
+.shell .nav a{font-size:20px;font-weight:400;border-radius:999px;padding:12px 16px;gap:18px}
+.shell .nav a:hover,.shell .nav a:focus-visible{background:#eff3f4}
+.shell .nav a[aria-current=page]{font-weight:750}
+.shell .nav svg{width:27px;height:27px}
+.shell .postbtn{background:#1d9bf0;border-radius:999px;font-weight:750;font-size:17px}
+.shell .top{padding:0;min-height:0;background:rgba(255,255,255,.88);border-bottom:1px solid var(--pia-x-line);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+.shell .top-title{min-height:57px;display:flex;gap:18px;align-items:center;padding:4px 16px;line-height:1.25}
+.shell .top-title>span{font-size:20px;font-weight:750;letter-spacing:-.3px}
+.shell .top-title.home-title{display:none}
+.shell .top-back{width:36px;height:36px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center}
+.shell .top-back:hover{background:#eff3f4}
+.shell .home-tabs{height:54px;display:flex;border:0}
+.shell .home-tab{flex:1;display:flex;align-items:center;justify-content:center;position:relative;padding:0;color:var(--pia-x-muted);font-size:15px;font-weight:500}
+.shell .home-tab.active{color:var(--pia-x-text);font-weight:700}
+.shell .home-tab.active:after{content:'';position:absolute;bottom:0;left:calc(50% - 28px);right:calc(50% - 28px);height:4px;background:var(--pia-x-blue);border-radius:999px}
+.shell .tweet{display:flex;align-items:flex-start;gap:10px;padding:12px 16px 7px;border-bottom:1px solid var(--pia-x-line);background:#fff;transition:background-color .15s ease}
+.shell .tweet:hover{background:var(--pia-x-hover)}
+.shell .tweet-avatar-link{flex:0 0 40px;align-self:flex-start}
+.shell .tweet .avatar{width:40px;height:40px;min-width:40px;background:#cfd9de;color:var(--pia-x-muted)}
+.shell .twbody{min-width:0;flex:1;max-width:100%;overflow:visible}
+.shell .twhead{min-width:0;min-height:21px;display:flex;align-items:center;flex-wrap:nowrap;gap:4px;overflow:hidden;line-height:1.28}
+.shell .twhead .name{flex:0 1 auto;max-width:43%;font-size:15px;font-weight:700;color:#0f1419;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.shell .twhead .name:hover{text-decoration:underline}
+.shell .twhead .handle{flex:0 1 auto;max-width:35%;font-size:15px;color:var(--pia-x-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.shell .twhead .meta{flex:0 0 auto;font-size:15px;color:var(--pia-x-muted);white-space:nowrap}
+.shell .tweet-more{width:32px;height:32px;padding:6px;flex:0 0 32px;align-self:center;margin-left:auto;color:var(--pia-x-muted);border-radius:50%;border:0;background:transparent}
+.shell .tweet-more svg{width:18px;height:18px}
+.shell .tweet-more:hover{color:var(--pia-x-blue);background:rgba(29,155,240,.1)}
+.shell .date-review-badge{font-size:10px;font-weight:650;line-height:1.4;padding:2px 5px;white-space:nowrap;border-radius:5px}
+.shell .replyto{margin:2px 0 3px;font-size:14px;line-height:1.3;color:var(--pia-x-muted)}
+.shell .replyto a{color:var(--pia-x-blue)}
+.shell .content{white-space:pre-wrap;overflow-wrap:anywhere;margin:3px 0 9px;color:var(--pia-x-text);font-size:15px;line-height:1.45}
+.shell .quote-card{display:block;margin:8px 0 10px!important;padding:0!important;border:1px solid #cfd9de!important;border-radius:16px!important;background:#fff;overflow:hidden;transition:background .15s ease}
+.shell .quote-card-linked{cursor:pointer}
+.shell .quote-card-linked:hover,.shell .quote-card-linked:focus-visible{background:#f7f9f9;outline:none}
+.shell .quote-card-linked:focus-visible{box-shadow:0 0 0 2px var(--pia-x-blue)}
+.shell .quote-card-header{display:flex;align-items:center;gap:5px;padding:11px 12px 0;min-width:0;white-space:nowrap;font-size:14px;line-height:20px;overflow:hidden}
+.shell .quote-card-header strong{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:14px;font-weight:700}
+.shell .quote-card-header .meta{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:14px;color:var(--pia-x-muted)}
+.shell .quote-avatar{display:inline-flex;align-items:center;justify-content:center;flex:0 0 20px;width:20px;height:20px;color:var(--pia-x-muted)}
+.shell .quote-avatar .avatar{width:20px;height:20px;min-width:20px}
+.shell .quote-avatar svg{width:16px;height:16px}
+.shell .quote-card-content{padding:4px 12px 12px;margin:0!important;white-space:pre-wrap;font-size:15px;line-height:1.43}
+/* Six equal action hit-targets. The left/right inset reproduces X's screenshot rhythm. */
+.shell .tweet .actions{display:flex!important;justify-content:space-between!important;align-items:center!important;gap:0!important;min-width:0;max-width:100%;width:100%;box-sizing:border-box;margin:1px 0 0!important;padding:0 20px 0 7px!important;overflow:visible;color:var(--pia-x-muted)}
+.shell .tweet .action-slot{display:inline-flex;flex:0 0 34px;width:34px;height:34px;align-items:center;justify-content:center;min-width:0}
+.shell .tweet .action{display:inline-flex;align-items:center;justify-content:center;position:relative;flex:0 0 34px;min-width:34px;width:34px;height:34px;margin:0!important;padding:0!important;gap:0!important;line-height:1;background:transparent;border:0;border-radius:50%;color:inherit;cursor:default}
+.shell .tweet button.action{cursor:pointer}
+.shell .tweet .action-icon{display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:999px;transition:background-color .14s ease}
+.shell .tweet .action svg{display:block;width:18px;height:18px;flex:0 0 18px;stroke-width:1.65}
+.shell .tweet .action-count{position:absolute;top:50%;left:30px;transform:translateY(-50%);margin:0;min-width:0;white-space:nowrap;font-size:12px;line-height:1;font-variant-numeric:tabular-nums;color:inherit;pointer-events:none}
+.shell .tweet .action-reply:hover,.shell .tweet .action-reply:focus-visible,.shell .tweet .action-view:hover,.shell .tweet .action-bookmark:hover,.shell .tweet .action-share:hover{color:var(--pia-x-blue)}
+.shell .tweet .action-reply:hover .action-icon,.shell .tweet .action-reply:focus-visible .action-icon,.shell .tweet .action-view:hover .action-icon,.shell .tweet .action-bookmark:hover .action-icon,.shell .tweet .action-share:hover .action-icon{background:rgba(29,155,240,.1)}
+.shell .tweet .action-repeat:hover{color:var(--pia-x-green)}
+.shell .tweet .action-repeat:hover .action-icon{background:rgba(0,186,124,.1)}
+.shell .tweet .action-heart:hover{color:var(--pia-x-pink)}
+.shell .tweet .action-heart:hover .action-icon{background:rgba(249,24,128,.1)}
+.shell .tweet .action:focus-visible{outline:2px solid var(--pia-x-blue);outline-offset:1px}
+/* Detailed post: author row on top, full-width body and full absolute timestamp. */
+.shell .thread-focus>.tweet.tweet-detail{display:grid;grid-template-columns:40px minmax(0,1fr);align-items:start;column-gap:12px;row-gap:0;background:#fff;padding:15px 16px 3px;cursor:default;border-bottom:1px solid var(--pia-x-line)}
+.shell .tweet-detail>.tweet-avatar-link{grid-column:1;grid-row:1}
+.shell .tweet-detail>.twbody{display:contents}
+.shell .tweet-detail .twhead{grid-column:2;grid-row:1;display:grid;grid-template-columns:minmax(0,1fr) 32px;grid-template-rows:20px 20px;column-gap:4px;align-items:center;overflow:visible;min-height:40px}
+.shell .tweet-detail .twhead .name{grid-column:1;grid-row:1;max-width:100%}
+.shell .tweet-detail .twhead .handle{grid-column:1;grid-row:2;max-width:100%;font-size:14px}
+.shell .tweet-detail .twhead .meta{display:none}
+.shell .tweet-detail .twhead .tweet-more{grid-column:2;grid-row:1 / 3;margin:0}
+.shell .tweet-detail .twhead .date-review-badge{display:none}
+.shell .tweet-detail .replyto,.shell .tweet-detail .content,.shell .tweet-detail .quote-card,.shell .tweet-detail .detail-time,.shell .tweet-detail .actions{grid-column:1 / -1}
+.shell .tweet-detail .replyto{margin-top:10px}
+.shell .tweet-detail>.twbody>.content,.shell .tweet-detail>.content{font-size:17px;line-height:1.55;margin:16px 0 13px}
+.shell .tweet-detail .quote-card{margin:0 0 13px!important}
+.shell .tweet-detail .detail-time{font-size:14px;color:var(--pia-x-muted);padding:1px 0 15px;margin-top:0;line-height:1.5}
+.shell .tweet-detail .actions{border-top:1px solid var(--pia-x-line);padding-top:6px!important;margin:0!important;margin-bottom:2px!important}
+.shell .thread-divider{border-bottom:1px solid var(--pia-x-line);padding:13px 16px;font-weight:700;font-size:15px}
+.shell .thread-ancestor,.shell .thread-descendant{position:relative}
+.shell .thread-ancestor:before,.shell .thread-descendant:before{left:35px;z-index:0;border-left-color:#cfd9de}
+/* Profile, search and navigation refinements; do not invent unavailable follower numbers. */
+.shell .cover{height:200px;background:#cfd9de}
+.shell .profile{padding:0 16px 15px;min-height:130px}
+.shell .profile .bigavatar{width:134px;height:134px;border:4px solid #fff;margin-top:-72px}
+.shell .profile h2{font-size:20px;font-weight:800;letter-spacing:-.3px;margin-top:13px!important}
+.shell .profile .handle{font-size:15px}
+.shell .profile .bio{font-size:15px;line-height:1.48;margin-top:13px;white-space:pre-wrap}
+.shell .profile-compose{display:none}
+.pia-admin-session .shell .profile-compose{display:block}
+.shell .tabs{border-bottom:1px solid var(--pia-x-line)}
+.shell .tabs button{position:relative;flex:1;border:0;border-radius:0;background:transparent;color:var(--pia-x-muted);padding:15px 6px;font-size:15px;font-weight:500}
+.shell .tabs button:hover{background:#eff3f4}
+.shell .tabs button.active{color:#0f1419;font-weight:700}
+.shell .tabs button.active:after{left:30%;width:40%;height:4px;border-radius:999px}
+.shell .pia-search-bar{position:relative;padding:12px 16px;border-bottom:1px solid var(--pia-x-line)}
+.shell .pia-search-icon{position:absolute;left:34px;top:50%;transform:translateY(-50%);color:var(--pia-x-muted);line-height:0;pointer-events:none}
+.shell .pia-search-icon svg{width:19px;height:19px}
+.shell .pia-search-bar .search{box-sizing:border-box;width:100%;height:45px;padding:10px 16px 10px 51px;border-radius:999px;border:1px solid transparent;background:#eff3f4;color:var(--pia-x-text);font-size:15px}
+.shell .pia-search-bar .search:focus{background:#fff;outline:0;border-color:var(--pia-x-blue)}
+.shell .right .search{height:44px;border-radius:999px;padding:12px 18px;font-size:14px}
+.shell .right .panel{border-radius:16px;background:#f7f9f9;padding:14px 0 8px;overflow:hidden}
+.shell .right .panel h3{font-size:20px;font-weight:800;padding:0 16px}
+.shell .side-account{display:flex;align-items:center;padding:12px 16px;gap:10px}
+.shell .side-account:hover{background:#eff3f4}
+.shell .side-account b{font-size:15px}
+.shell .side-account small{font-size:14px;color:var(--pia-x-muted)}
+.shell .account-directory-item{padding:13px 16px;gap:12px}
+.shell .account-directory-item strong{font-size:15px;font-weight:700}
+.shell .account-directory-item small{font-size:14px;color:var(--pia-x-muted)}
+@media(max-width:1200px){.shell{grid-template-columns:88px minmax(0,600px) minmax(270px,350px)}.shell .left{padding:0 8px}.shell .left .nav a{width:54px;justify-content:center;padding:12px}.shell .left .nav span,.shell .postbtn{display:none}}
+@media(max-width:1030px){.shell{max-width:688px;grid-template-columns:88px minmax(0,600px)}.shell .right{display:none}}
+@media(max-width:600px){
+ .shell{display:block;max-width:600px;padding-bottom:calc(60px + env(safe-area-inset-bottom,0px))}
+ .shell .center{border:0}
+ .shell .left{position:fixed;top:auto;left:0;right:0;bottom:0;z-index:10;width:100%;height:calc(60px + env(safe-area-inset-bottom,0px));padding:0 0 env(safe-area-inset-bottom,0px);border-top:1px solid var(--pia-x-line);background:rgba(255,255,255,.96);backdrop-filter:blur(12px)}
+ .shell .left .nav{display:flex;width:100%;height:60px;align-items:center;justify-content:space-around}
+ .shell .left .nav a{display:flex!important;flex:1;width:auto;height:58px;align-items:center;justify-content:center;margin:0;padding:0;border-radius:0}
+ .shell .left .nav a svg{width:25px;height:25px}
+ .shell .left .nav span,.shell .left .logo,.shell .left .postbtn{display:none!important}
+ .shell .top-title.home-title{display:flex;min-height:52px;justify-content:center}
+ .shell .top-title.home-title>span{font-size:24px;font-weight:800}
+ .shell .home-tabs{height:48px}
+ .shell .tweet{padding:11px 12px 7px;gap:10px}
+ .shell .twhead .name{max-width:39%}
+ .shell .twhead .handle{max-width:30%;font-size:14px}
+ .shell .twhead .meta{font-size:14px}
+ .shell .tweet .actions{padding-right:12px!important;padding-left:5px!important}
+ .shell .tweet .action-slot{width:32px;height:32px;flex-basis:32px}
+ .shell .tweet .action{width:32px;min-width:32px;height:32px;flex-basis:32px}
+ .shell .tweet .action-icon{width:32px;height:32px}
+ .shell .tweet .action svg{width:17.5px;height:17.5px}
+ .shell .tweet .action-count{left:28px;font-size:11px}
+ .shell .thread-ancestor:before,.shell .thread-descendant:before{left:31px}
+ .shell .thread-focus>.tweet.tweet-detail{padding:13px 12px 4px;column-gap:10px}
+ .shell .profile .bigavatar{width:124px;height:124px;margin-top:-68px}
+ .shell .cover{height:150px}
+}
+@media(max-width:360px){
+ .shell .tweet .actions{padding:0 9px 0 2px!important}
+ .shell .tweet .action-slot{width:29px;height:30px;flex-basis:29px}
+ .shell .tweet .action{min-width:29px;width:29px;height:30px;flex-basis:29px}
+ .shell .tweet .action-icon{width:29px;height:30px}
+ .shell .tweet .action svg{width:16.5px;height:16.5px}
+ .shell .tweet .action-count{left:26px;font-size:10px}
+}
+@media(prefers-reduced-motion:reduce){.shell .tweet,.shell .action-icon{transition:none}}
+/* Preserve original light default; account for app's explicit dark theme if enabled. */
+:root[data-theme=dark] .shell{--pia-x-text:#e7e9ea;--pia-x-muted:#71767b;--pia-x-line:#2f3336;--pia-x-hover:#080808;color:#e7e9ea}
+:root[data-theme=dark] .shell .tweet,:root[data-theme=dark] .shell .tweet-detail,:root[data-theme=dark] .shell .quote-card{background:#000;color:#e7e9ea}
+:root[data-theme=dark] .shell .tweet:hover{background:#080808}
+:root[data-theme=dark] .shell .top{background:rgba(0,0,0,.87)}
+:root[data-theme=dark] .shell .twhead .name,:root[data-theme=dark] .shell .content{color:#e7e9ea}
+:root[data-theme=dark] .shell .quote-card{border-color:#2f3336!important}
+:root[data-theme=dark] .shell .right .panel{background:#16181c}
