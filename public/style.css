@@ -312,3 +312,84 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Ar
 :root[data-theme=dark] .shell .twhead .name,:root[data-theme=dark] .shell .content{color:#e7e9ea}
 :root[data-theme=dark] .shell .quote-card{border-color:#2f3336!important}
 :root[data-theme=dark] .shell .right .panel{background:#16181c}
+
+
+/* v0.3.22 — Calibrated against supplied 425px X reaction-bar screenshot.
+   Older 6-way equal-spacing and fixed 4+2 gap rules deliberately overridden.
+   Targets are measured from the beginning of tweet text, not viewport x=0. */
+.shell .tweet:not(.tweet-detail) .content{margin-bottom:5px}
+.shell .tweet .actions{
+  display:flex!important;
+  align-items:center!important;
+  justify-content:space-between!important;
+  width:calc(100% + 12px)!important;
+  max-width:none!important;
+  min-width:0!important;
+  padding:0!important;
+  margin:1px 0 0 -12px!important;
+  gap:0!important;
+  overflow:visible;
+}
+.shell .tweet .actions-main,
+.shell .tweet .actions-side{display:flex!important;align-items:center;min-width:0}
+.shell .tweet .actions-main{
+  width:calc(79% - 9.5px)!important;
+  flex:0 0 calc(79% - 9.5px)!important;
+  max-width:none!important;
+  padding:0!important;
+  justify-content:space-between!important;
+}
+.shell .tweet .actions-main>.action{
+  flex:0 0 44px!important;
+  width:44px!important;
+  min-width:44px!important;
+  justify-content:flex-start!important;
+  gap:0!important;
+}
+.shell .tweet .actions-main .action-icon{width:34px!important;flex:0 0 34px!important}
+.shell .tweet .actions-main .action-count{
+  position:static!important;
+  transform:none!important;
+  font-size:12px!important;
+  margin-left:-1px!important;
+  line-height:1!important;
+}
+.shell .tweet .actions-side{
+  width:48px!important;
+  flex:0 0 48px!important;
+  gap:0!important;
+  margin-left:auto!important;
+  justify-content:space-between!important;
+  transform:translateX(2px);
+}
+.shell .tweet .actions-side>.action{
+  width:24px!important;
+  min-width:24px!important;
+  flex:0 0 24px!important;
+  justify-content:center!important;
+  padding:0!important;
+}
+.shell .tweet .actions-side .action-icon{
+  width:24px!important;
+  height:32px!important;
+  flex:0 0 24px!important;
+  justify-content:center!important;
+}
+.shell .tweet .actions-side .action svg{width:18px!important;height:18px!important}
+@media(max-width:600px){
+  .shell .tweet .actions-main>.action{width:40px!important;min-width:40px!important;flex-basis:40px!important}
+  .shell .tweet .actions-main .action-icon{width:32px!important;flex-basis:32px!important}
+  .shell .tweet .actions-main .action-count{font-size:12px!important}
+}
+@media(max-width:360px){
+  .shell .tweet .actions-main>.action{width:35px!important;min-width:35px!important;flex-basis:35px!important}
+  .shell .tweet .actions-main .action-icon{width:30px!important;flex-basis:30px!important}
+  .shell .tweet .actions-main .action-count{font-size:11px!important}
+}
+
+/* The detailed post uses full-width action row, avoiding any list-only negative inset. */
+.shell .tweet-detail .actions{
+ width:100%!important;
+ margin:0 0 2px!important;
+ padding:6px 0 0!important;
+}
