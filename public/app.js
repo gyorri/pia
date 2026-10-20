@@ -6,7 +6,7 @@ function render(){let hash=decodeURIComponent(location.hash.slice(1)||'/');let p
 
 
 // v0.3.1: Authenticated quick composer. Never expose admin-data to non-admin visitors.
-let quickAdminAccounts=null,quickSaving=false,quickLastAuthor='';
+let quickAdminAccounts=null,quickAdminPosts=[],quickSaving=false,quickLastAuthor='';
 const quickDate=()=>{const d=new Date();return new Date(d.getTime()+9*3600000).toISOString().slice(0,16)};
 function quickClose(){document.getElementById('quickComposer')?.remove();document.body.classList.remove('quick-modal-open')}
 async function quickOpen({replyId='',authorId=''}={}){
@@ -16,7 +16,7 @@ async function quickOpen({replyId='',authorId=''}={}){
     const r=await fetch('/api/admin-data',{credentials:'same-origin',cache:'no-store'});
     if(r.status===401){if(confirm('빠른 등록은 관리자 로그인이 필요합니다. 관리자 로그인 화면으로 이동할까요?'))location.href='/admin.html';return}
     const data=await r.json();if(!r.ok)throw Error(data.error||'관리자 데이터를 불러오지 못했습니다.');
-    accounts=data.accounts||[];quickAdminAccounts=accounts;
+    accounts=data.accounts||[];quickAdminAccounts=accounts;quickAdminPosts=data.posts||[];
   }catch(err){alert('빠른 등록을 열 수 없습니다: '+err.message);return}
   if(!accounts.length){alert('먼저 관리자에서 계정을 등록해 주세요.');return}
   const target=db.posts.find(p=>p.id===replyId);
@@ -28,10 +28,42 @@ async function quickOpen({replyId='',authorId=''}={}){
     ${target?`<div class="quick-target"><span>답글 대상 · ${esc(targetAccount?.name||'알 수 없음')} @${esc(targetAccount?.handle||'')}</span><p>${esc(target.content.slice(0,250))}</p></div>`:''}
     <form id="quickForm"><label for="quickAuthor">작성 계정</label><select id="quickAuthor" required>${accounts.map(a=>`<option value="${esc(a.id)}" ${a.id===selected?'selected':''}>${esc(a.name)} (@${esc(a.handle)})</option>`).join('')}</select>
     <label for="quickContent">${replyId?'답글 내용':'게시물 내용'}</label><textarea id="quickContent" rows="5" maxlength="10000" placeholder="내용을 입력하세요" required></textarea>
+    <div id="quickDuplicateToast" class="quick-duplicate-toast" role="status" aria-live="polite" hidden></div>
     <div class="quick-fields"><div><label for="quickTime">원본 작성 날짜·시간</label><input id="quickTime" type="datetime-local" required value="${quickDate()}"></div><div><label for="quickOffset">시간대</label><select id="quickOffset"><option value="+09:00">한국 +09:00</option><option value="+00:00">UTC +00:00</option></select></div></div>
     <div class="quick-footer"><span id="quickMessage" role="status"></span><button type="submit" class="quick-submit">${replyId?'답글 저장':'게시물 저장'}</button></div>
     </form></section>`;
   document.body.append(overlay);document.body.classList.add('quick-modal-open');
+  // Search only the selected author’s existing posts. No draft is sent to a server.
+  const authorField=overlay.querySelector('#quickAuthor');
+  const contentField=overlay.querySelector('#quickContent');
+  const duplicateToast=overlay.querySelector('#quickDuplicateToast');
+  let duplicateTimer;
+  const normalizeText=s=>String(s||'').normalize('NFKC').toLowerCase().replace(/\s+/g,' ').trim();
+  const tightText=s=>normalizeText(s).replace(/\s/g,'');
+  const textSimilarity=(a,b)=>{
+    if(a===b)return 1;
+    if(a.includes(b)||b.includes(a))return Math.min(a.length,b.length)/Math.max(a.length,b.length)*.88;
+    const tokens=s=>new Set(s.match(/[\p{L}\p{N}_]{2,}/gu)||[]);
+    const x=tokens(a),y=tokens(b);let same=0;
+    for(const token of x)if(y.has(token))same++;
+    return x.size+y.size?2*same/(x.size+y.size):0;
+  };
+  const checkDuplicates=()=>{
+    const raw=contentField.value,normalized=normalizeText(raw),dense=tightText(raw);
+    if(dense.length<8){duplicateToast.hidden=true;duplicateToast.replaceChildren();return}
+    const matches=quickAdminPosts.filter(p=>String(p.account_id)===String(authorField.value)).map(p=>{
+      const exact=tightText(p.content)===dense;
+      return {post:p,exact,score:exact?1:textSimilarity(normalized,normalizeText(p.content))};
+    }).filter(x=>x.exact||x.score>=.65).sort((a,b)=>b.score-a.score).slice(0,4);
+    if(!matches.length){duplicateToast.hidden=true;duplicateToast.replaceChildren();return}
+    duplicateToast.hidden=false;
+    duplicateToast.innerHTML='<div class="quick-dup-heading">⚠ 같은 작성자의 기존 게시물 '+matches.length+'건 발견</div>'+matches.map(({post,exact})=>
+      `<div class="quick-dup-result"><span class="quick-dup-tag">${exact?'본문 일치':'유사 내용'}</span><span class="quick-dup-date">${esc(post.posted_at||'')}</span><p>${esc(String(post.content||'').slice(0,180))}${String(post.content||'').length>180?'…':''}</p><a href="${pathPost(post)}" class="quick-dup-link" target="_blank" rel="noopener">기존 글 보기 ↗</a></div>`
+    ).join('')+'<div class="quick-dup-note">중복 확인용 안내이며 저장은 차단하지 않습니다.</div>';
+  };
+  const scheduleDuplicates=()=>{clearTimeout(duplicateTimer);duplicateTimer=setTimeout(checkDuplicates,280)};
+  contentField.addEventListener('input',scheduleDuplicates);
+  authorField.addEventListener('change',()=>{clearTimeout(duplicateTimer);checkDuplicates()});
   overlay.querySelector('.quick-close').onclick=quickClose;
   overlay.addEventListener('click',e=>{if(e.target===overlay)quickClose()});
   overlay.querySelector('#quickForm').onsubmit=async e=>{

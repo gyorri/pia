@@ -95,3 +95,13 @@ button.action{font:inherit;border:0;background:transparent;cursor:pointer}button
 .quick-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px}.quick-footer span{font-size:13px;color:#b42318}.quick-submit{background:#1d9bf0;color:#fff;border:0;border-radius:999px;padding:12px 24px;font-size:15px;font-weight:700;cursor:pointer;flex-shrink:0}.quick-submit:disabled{opacity:.6;cursor:wait}
 .quick-toast{position:fixed;z-index:10000;bottom:80px;left:50%;transform:translateX(-50%);background:#0f1419;color:#fff;border-radius:999px;padding:12px 20px;box-shadow:0 5px 20px #0003}
 @media(max-width:600px){.quick-overlay{padding:0;align-items:stretch}.quick-dialog{border-radius:0;min-height:100dvh}.quick-dialog form{padding:12px 16px 26px}.quick-fields{grid-template-columns:minmax(0,1fr) 110px}.profile-compose{font-size:12px;padding:9px 12px}}
+
+/* v0.3.2: duplicate suggestions in authenticated quick composer */
+.quick-duplicate-toast[hidden]{display:none!important}
+.quick-duplicate-toast{border:1px solid #f0c36d;border-radius:12px;background:#fff9e8;padding:10px 12px;margin:6px 0 4px;max-height:245px;overflow-y:auto;color:#0f1419;box-shadow:0 4px 12px #0000000a}
+.quick-dup-heading{font-size:13px;font-weight:750;color:#8b5700;margin-bottom:6px}
+.quick-dup-result{padding:8px 0;border-top:1px solid #f4e4c0;font-size:12px;line-height:1.4}
+.quick-dup-tag{font-weight:750;color:#a35d00;margin-right:8px}.quick-dup-date{color:#536471;font-size:11px}
+.quick-dup-result p{white-space:pre-wrap;overflow-wrap:anywhere;margin:4px 0;color:#0f1419;font-size:13px}
+.quick-dup-link{font-weight:650;color:#1d9bf0;text-decoration:none}.quick-dup-link:hover{text-decoration:underline}
+.quick-dup-note{font-size:11px;color:#536471;padding-top:6px}
