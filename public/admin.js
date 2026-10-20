@@ -40,6 +40,16 @@ const originalInit=init;init=async function(){await originalInit();if(!document.
 // Allow pasting copied timestamps into admin post and quoted-post date fields.
 function piaAdminParseDate(raw){
  let s=String(raw||'').trim().replace(/\s+/g,' ');
+ // X copied timestamp: 오후 2:15 · 2025년 12월 30일
+ const x=s.match(/^(오전|오후)\s*(\d{1,2}):(\d{2})\s*[·ㆍ•]\s*(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일$/);
+ if(x){
+  const [,ap,hh,mm,yy,mon,dd]=x;const year=+yy,month=+mon,day=+dd,minute=+mm;let hour=+hh;
+  if(hour<1||hour>12||minute>59||month<1||month>12||day<1)return null;
+  const d=new Date(Date.UTC(year,month-1,day));
+  if(d.getUTCFullYear()!==year||d.getUTCMonth()+1!==month||d.getUTCDate()!==day)return null;
+  hour=hour%12+(ap==='오후'?12:0);
+  return `${yy}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}T${String(hour).padStart(2,'0')}:${mm}`;
+ }
  const mer=s.match(/(오전|오후|AM|PM)/i);s=s.replace(/(오전|오후|AM|PM)/ig,'').trim();
  const m=s.match(/^(\d{4})[.\/-]\s*(\d{1,2})[.\/-]\s*(\d{1,2})\.?\s*(?:T|\s)\s*(\d{1,2}):(\d{2})(?::\d{2})?$/i);
  if(!m)return null;
