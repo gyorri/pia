@@ -83,3 +83,15 @@ for(const field of ['posted_at','quote_posted_at']){
   input.value=parsed;input.dispatchEvent(new Event('change',{bubbles:true}));status('날짜가 입력되었습니다. 저장 버튼을 눌러 적용하세요.');
  });
 }
+
+// 관리자 화면 탭: 폼 입력 상태를 보존한 채 표시만 전환합니다.
+function piaSelectAdminTab(name){
+ for(const panel of document.querySelectorAll('[data-admin-panel]'))panel.hidden=panel.dataset.adminPanel!==name;
+ for(const tab of document.querySelectorAll('button[data-admin-tab]')){const selected=tab.dataset.adminTab===name;tab.classList.toggle('active',selected);tab.setAttribute('aria-selected',String(selected));}
+ try{sessionStorage.setItem('pia_admin_tab',name)}catch(e){}
+}
+document.querySelectorAll('button[data-admin-tab]').forEach(b=>b.addEventListener('click',()=>piaSelectAdminTab(b.dataset.adminTab)));
+let piaInitialTab='post';try{piaInitialTab=sessionStorage.getItem('pia_admin_tab')||'post'}catch(e){}
+piaSelectAdminTab(['post','account','settings'].includes(piaInitialTab)?piaInitialTab:'post');
+// 기존 수정 버튼에서 해당 폼의 탭으로 먼저 이동합니다.
+document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.editAccount)piaSelectAdminTab('account');if(b.dataset.editPost)piaSelectAdminTab('post')},true);
