@@ -8,6 +8,16 @@ function render(){let hash=decodeURIComponent(location.hash.slice(1)||'/');let p
 // v0.3.1: Authenticated quick composer. Never expose admin-data to non-admin visitors.
 let quickAdminAccounts=null,quickAdminPosts=[],quickSaving=false,quickLastAuthor='';
 const quickDate=()=>{const d=new Date();return new Date(d.getTime()+9*3600000).toISOString().slice(0,16)};
+// Reply composer default only: inherit the parent's calendar date in Korea, not its time.
+// Never infer an original timestamp from an invalid or missing parent date.
+function quickReplyDefault(parent){
+  if(!parent || !parent.posted_at)return quickDate();
+  const parsed=new Date(parent.posted_at);
+  if(!Number.isFinite(parsed.getTime()))return quickDate();
+  const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(parsed);
+  const field=type=>parts.find(x=>x.type===type)?.value;
+  return `${field('year')}-${field('month')}-${field('day')}T12:00`;
+}
 function quickClose(){document.getElementById('quickComposer')?.remove();document.body.classList.remove('quick-modal-open')}
 async function quickOpen({replyId='',authorId=''}={}){
   quickClose();
@@ -29,7 +39,7 @@ async function quickOpen({replyId='',authorId=''}={}){
     <form id="quickForm"><label for="quickAuthor">작성 계정</label><select id="quickAuthor" required>${accounts.map(a=>`<option value="${esc(a.id)}" ${a.id===selected?'selected':''}>${esc(a.name)} (@${esc(a.handle)})</option>`).join('')}</select>
     <label for="quickContent">${replyId?'답글 내용':'게시물 내용'}</label><textarea id="quickContent" rows="5" maxlength="10000" placeholder="내용을 입력하세요" required></textarea>
     <div id="quickDuplicateToast" class="quick-duplicate-toast" role="status" aria-live="polite" hidden></div>
-    <div class="quick-fields"><div><label for="quickTime">원본 작성 날짜·시간</label><input id="quickTime" type="datetime-local" required value="${quickDate()}"></div><div><label for="quickOffset">시간대</label><select id="quickOffset"><option value="+09:00">한국 +09:00</option><option value="+00:00">UTC +00:00</option></select></div></div>
+    <div class="quick-fields"><div><label for="quickTime">원본 작성 날짜·시간</label><input id="quickTime" type="datetime-local" required value="${replyId?quickReplyDefault(target):quickDate()}"></div><div><label for="quickOffset">시간대</label><select id="quickOffset"><option value="+09:00">한국 +09:00</option><option value="+00:00">UTC +00:00</option></select></div></div>
     <div class="quick-footer"><span id="quickMessage" role="status"></span><button type="submit" class="quick-submit">${replyId?'답글 저장':'게시물 저장'}</button></div>
     </form></section>`;
   document.body.append(overlay);document.body.classList.add('quick-modal-open');
