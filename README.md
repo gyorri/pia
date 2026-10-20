@@ -1,15 +1,19 @@
-# PIA v0.2.0
+# PIA v0.2.1 관리자 UI 패치
 
-## Cloudflare Pages + D1 배포
-1. ZIP의 **내용물 전체**를 GitHub 저장소 루트에 업로드합니다. `public/`, `functions/`, `schema.sql`이 모두 루트에 있어야 합니다.
-2. Cloudflare Pages Git 연동: Root directory `/`, Build command 비움, Build output directory `public`.
-3. Cloudflare > D1에서 DB를 생성합니다. D1 SQL 콘솔에 `schema.sql` 내용을 실행합니다.
-4. Pages 프로젝트 > Settings > Bindings > D1 database 바인딩 추가: **Variable name `DB`**, 생성한 DB 선택.
-5. Pages 프로젝트 > Settings > Variables and Secrets: **`ADMIN_PASSWORD`를 Secret**으로 설정합니다. 길고 고유한 비밀번호를 사용하세요.
-6. Pages에서 새 배포(Retry deployment 또는 Git 커밋)를 실행합니다. `/admin.html`에 접속하여 로그인 후 계정과 게시물을 입력합니다.
+기존 v0.2.0 소스에 **변경 파일만** 덮어쓰는 패치입니다. GitHub 저장소 최상위에 ZIP의 `public/` 폴더 구조 그대로 업로드하세요.
 
-**주의:** 공개 타임라인은 로그인 없이 조회 가능하며 관리자 API만 비밀번호 세션으로 보호됩니다. 공개할 권한이 없는 개인정보/비공개 대화는 등록하지 마세요. X 연동은 없습니다. 초기 데이터는 비어 있습니다. 이전 브라우저 localStorage 테스트 데이터는 자동 이전되지 않습니다.
+- `public/admin.html` 교체
+- `public/admin.js` 교체
+- `public/admin.css` 신규 추가
+- `README.md`, `HISTORY.md` 최신화
 
-## 변경 이력
-- v0.2.0: 라이트 테마 기본, D1 DB, 관리자 로그인, 계정·게시물 CRUD, 원본 시간대 입력.
-- v0.1.0: 로컬스토리지 시제품.
+Cloudflare Pages 출력 디렉터리는 기존대로 `public`입니다. D1 SQL 및 API 코드는 변경하지 않습니다. 관리자 접속은 `/admin.html`입니다.
+
+## 입력 순서
+1. 관리자 로그인 후 계정 닉네임·아이디를 저장합니다.
+2. 게시물 작성자를 선택하고 원본 날짜·시간과 시간대를 입력합니다.
+3. 답글은 게시물 유형을 '다른 게시물에 답글'로 선택한 후 원문을 지정합니다.
+4. 등록 목록에서 수정·삭제할 수 있습니다.
+
+## 참고
+프로필 사진은 URL 입력 방식이며 이미지 업로드 기능은 아직 없습니다. 원본 날짜·시간은 지정한 UTC 오프셋으로 DB에 저장됩니다. DB 바인딩 `DB`와 Secret `ADMIN_PASSWORD`는 기존 설정을 유지합니다.
