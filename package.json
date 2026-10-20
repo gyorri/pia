@@ -1,1 +1,5 @@
-{"name":"x-archive-test","version":"0.1.0","private":true,"scripts":{"dev":"wrangler pages dev public","deploy":"wrangler pages deploy public"},"devDependencies":{"wrangler":"^4.0.0"}}
+{
+  "name": "pia-archive",
+  "version": "0.2.0",
+  "private": true
+}
