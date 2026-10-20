@@ -138,3 +138,5 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Ar
  .tweet .action{padding:7px 2px;min-width:21px}
  .tweet .action svg{width:16px;height:16px}
 }
+
+.date-review-badge{display:inline-flex;margin-left:6px;padding:1px 5px;border:1px solid #f3c56b;border-radius:4px;background:#fff6dc;color:#815500;font-size:10px;font-weight:600;vertical-align:middle;white-space:nowrap}

@@ -1,0 +1,1 @@
+ALTER TABLE posts ADD COLUMN date_needs_review INTEGER NOT NULL DEFAULT 0;
