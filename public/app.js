@@ -43,6 +43,7 @@ async function quickOpen({replyId='',authorId=''}={}){
     <div class="quick-footer"><span id="quickMessage" role="status"></span><button type="submit" class="quick-submit">${replyId?'답글 저장':'게시물 저장'}</button></div>
     </form></section>`;
   document.body.append(overlay);document.body.classList.add('quick-modal-open');
+  piaBindDatePaste(overlay.querySelector('#quickTime'),overlay.querySelector('#quickMessage'));
   // Search only the selected author’s existing posts. No draft is sent to a server.
   const authorField=overlay.querySelector('#quickAuthor');
   const contentField=overlay.querySelector('#quickContent');
@@ -104,15 +105,43 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape')quickClose()});
 // v0.3.3: Share an archive permalink, not a simulated X engagement action.
 document.addEventListener('click',async e=>{const btn=e.target.closest('[data-share-id]');if(!btn)return;e.preventDefault();e.stopPropagation();const url=new URL(pathPost({id:btn.dataset.shareId}),location.origin).href;try{await navigator.clipboard.writeText(url);const toast=document.createElement('div');toast.className='quick-toast';toast.textContent='게시물 링크를 복사했습니다.';document.body.append(toast);setTimeout(()=>toast.remove(),2200)}catch{prompt('게시물 링크',url)}});
 
+// Date paste support for both quick registration and editing.
+function piaBindDatePaste(input, feedback){
+ if(!input)return;
+ input.addEventListener('paste',e=>{
+  const raw=e.clipboardData?.getData('text');if(!raw)return;
+  const parsed=piaParsePastedDate(raw);
+  e.preventDefault();
+  if(!parsed){if(feedback)feedback.textContent='날짜 형식을 확인해 주세요. 예: 2026-10-15 14:30';return}
+  input.value=parsed;input.dispatchEvent(new Event('change',{bubbles:true}));
+  if(feedback)feedback.textContent='날짜가 입력되었습니다. 저장 버튼을 눌러 적용하세요.';
+ });
+}
 // v0.3.8: manage posts only with authenticated admin session.
 let piaManageAuthorized=false;
 fetch('/api/session',{credentials:'same-origin',cache:'no-store'}).then(r=>r.ok?r.json():null).then(d=>{piaManageAuthorized=!!d?.authenticated;document.body.classList.toggle('pia-admin-session',piaManageAuthorized)}).catch(()=>{});
 function piaLocalTime(iso){const d=new Date(iso);if(!Number.isFinite(d.getTime()))return '';const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(d);const o=Object.fromEntries(parts.map(x=>[x.type,x.value]));return `${o.year}-${o.month}-${o.day}T${o.hour}:${o.minute}`}
+// Accept copied Korean/local date strings in the post edit dialog without changing saved data until submit.
+function piaParsePastedDate(raw){
+ let s=String(raw||'').trim().replace(/\s+/g,' ');
+ const meridiem=s.match(/(오전|오후|AM|PM)/i);
+ s=s.replace(/(오전|오후|AM|PM)/ig,'').trim();
+ const m=s.match(/^(\d{4})[.\/-]\s*(\d{1,2})[.\/-]\s*(\d{1,2})\.?\s*(?:T|\s)\s*(\d{1,2}):(\d{2})(?::\d{2})?$/i);
+ if(!m)return null;
+ let [,y,mo,d,h,mi]=m;let hour=Number(h),minute=Number(mi),month=Number(mo),day=Number(d),year=Number(y);
+ if(meridiem){if(hour<1||hour>12)return null;hour=hour%12+(/오후|PM/i.test(meridiem[1])?12:0)}
+ if(year<1||month<1||month>12||day<1||hour>23||minute>59)return null;
+ const check=new Date(Date.UTC(year,month-1,day));
+ if(check.getUTCFullYear()!==year||check.getUTCMonth()+1!==month||check.getUTCDate()!==day)return null;
+ return `${y}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}T${String(hour).padStart(2,'0')}:${mi}`;
+}
 async function piaRefreshPosts(){const r=await fetch('/api/data',{cache:'no-store'});if(!r.ok)throw Error('새로고침 실패');db=await r.json();render()}
 function piaManageDialog(id){const p=db.posts.find(x=>String(x.id)===String(id));if(!p)return;
  const overlay=document.createElement('div');overlay.className='pia-manage-overlay';
  overlay.innerHTML=`<section class="pia-manage-dialog" role="dialog" aria-modal="true" aria-label="게시물 수정"><div class="pia-manage-head"><strong>게시물 수정</strong><button type="button" data-close aria-label="닫기">✕</button></div><form id="piaManageForm"><label>작성자<select name="account_id" required>${db.accounts.map(a=>`<option value="${esc(a.id)}" ${a.id===p.account_id?'selected':''}>${esc(a.name)} (@${esc(a.handle)})</option>`).join('')}</select></label><label>내용<textarea name="content" required maxlength="10000" rows="6">${esc(p.content)}</textarea></label><label>원본 날짜·시간 (한국 시간)<input name="posted_at" type="datetime-local" value="${esc(piaLocalTime(p.posted_at))}" required></label><label class="pia-review-check"><input name="date_needs_review" type="checkbox" ${p.date_needs_review?'checked':''}> 날짜수정필요</label><label>답글 대상<select name="parent_id"><option value="">일반 게시물 (부모 없음)</option>${db.posts.filter(x=>x.id!==p.id).map(x=>`<option value="${esc(x.id)}" ${x.id===p.parent_id?'selected':''}>${esc(account(x.account_id).name)}: ${esc(String(x.content).slice(0,55))}</option>`).join('')}</select></label><p class="pia-manage-note">인용 게시물의 원문 정보는 기존 값을 유지합니다. 인용 원문 수정은 관리자 화면을 이용하세요.</p><div class="pia-manage-actions"><button type="button" class="pia-delete" data-delete>삭제</button><button type="submit" class="pia-save">변경 저장</button></div><p class="pia-manage-message" role="status"></p></form></section>`;
  document.body.append(overlay);const close=()=>overlay.remove();overlay.querySelector('[data-close]').onclick=close;overlay.addEventListener('click',e=>{if(e.target===overlay)close()});const form=overlay.querySelector('form'),msg=overlay.querySelector('.pia-manage-message');let busy=false;
+ const dateInput=form.elements.namedItem('posted_at');
+ piaBindDatePaste(dateInput,msg);
  const submit=async(method,body)=>{if(busy)return;busy=true;msg.textContent='처리 중…';try{const r=await fetch('/api/posts',{method,credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||'요청 실패');await piaRefreshPosts();close()}catch(e){msg.textContent=e.message||'오류가 발생했습니다.'}finally{busy=false}};
  form.onsubmit=e=>{e.preventDefault();const fd=new FormData(form),parent=String(fd.get('parent_id')||'')||null;if(parent&&p.quote_content){msg.textContent='인용 게시물은 답글 대상으로 연결할 수 없습니다.';return}submit('POST',{id:p.id,account_id:String(fd.get('account_id')),content:String(fd.get('content')),posted_at:String(fd.get('posted_at'))+':00+09:00',parent_id:parent,quote_name:p.quote_name||'',quote_handle:p.quote_handle||'',quote_content:p.quote_content||'',quote_posted_at:p.quote_posted_at||null,date_needs_review:fd.has('date_needs_review')})};
  overlay.querySelector('[data-delete]').onclick=()=>{const children=db.posts.filter(x=>x.parent_id===p.id).length;if(!confirm('이 게시물을 삭제할까요?'+(children?'\n연결된 답글 '+children+'건이 있어 삭제가 실패할 수 있습니다.':'')))return;submit('DELETE',{id:p.id})};

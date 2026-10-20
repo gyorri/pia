@@ -36,3 +36,25 @@ document.addEventListener('click',e=>{const b=e.target.closest('[data-duplicate-
 async function refreshAnonState(){try{const d=await api('admin-data');const el=document.querySelector('#anonToggle');if(el){el.checked=!!d.anonymous;document.querySelector('#anonState').textContent=d.anonymous?'현재 공개 화면: 익명화':'현재 공개 화면: 원본 표시'}}catch(e){status(e.message,true)}}
 document.querySelector('#anonToggle')?.addEventListener('change',async e=>{const el=e.target;el.disabled=true;try{await api('anonymize',{method:'POST',body:JSON.stringify({enabled:el.checked})});status(el.checked?'익명화가 적용되었습니다.':'원본 표시로 전환했습니다.');await refreshAnonState()}catch(err){el.checked=!el.checked;status(err.message,true)}finally{el.disabled=false}});
 const originalInit=init;init=async function(){await originalInit();if(!document.querySelector('#workspace').hidden)await refreshAnonState()};
+
+// Allow pasting copied timestamps into admin post and quoted-post date fields.
+function piaAdminParseDate(raw){
+ let s=String(raw||'').trim().replace(/\s+/g,' ');
+ const mer=s.match(/(오전|오후|AM|PM)/i);s=s.replace(/(오전|오후|AM|PM)/ig,'').trim();
+ const m=s.match(/^(\d{4})[.\/-]\s*(\d{1,2})[.\/-]\s*(\d{1,2})\.?\s*(?:T|\s)\s*(\d{1,2}):(\d{2})(?::\d{2})?$/i);
+ if(!m)return null;
+ const year=+m[1],month=+m[2],day=+m[3],minute=+m[5];let hour=+m[4];
+ if(mer){if(hour<1||hour>12)return null;hour=hour%12+(/오후|PM/i.test(mer[1])?12:0)}
+ if(year<1||month<1||month>12||day<1||hour>23||minute>59)return null;
+ const d=new Date(Date.UTC(year,month-1,day));if(d.getUTCFullYear()!==year||d.getUTCMonth()+1!==month||d.getUTCDate()!==day)return null;
+ return `${m[1]}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}T${String(hour).padStart(2,'0')}:${m[5]}`;
+}
+for(const field of ['posted_at','quote_posted_at']){
+ const input=$('#postForm').elements[field];
+ input.addEventListener('paste',e=>{
+  const raw=e.clipboardData?.getData('text');if(!raw)return;
+  const parsed=piaAdminParseDate(raw);e.preventDefault();
+  if(!parsed){status('날짜 형식을 확인해 주세요. 예: 2026-10-15 14:30',true);return}
+  input.value=parsed;input.dispatchEvent(new Event('change',{bubbles:true}));status('날짜가 입력되었습니다. 저장 버튼을 눌러 적용하세요.');
+ });
+}
