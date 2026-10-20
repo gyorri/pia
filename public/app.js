@@ -134,6 +134,17 @@ function piaParsePastedDate(raw){
   hour=hour%12+(ap==='오후'?12:0);
   return `${yy}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}T${String(hour).padStart(2,'0')}:${mm}`;
  }
+ // X copied timestamp: 2023. 8. 10. · 오전 12:04
+ const reverse=s.match(/^(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})\.\s*[·ㆍ•]\s*(오전|오후)\s*(\d{1,2}):(\d{2})$/);
+ if(reverse){
+  const [,yy,mo,dd,ap,hh,mm]=reverse;
+  const year=Number(yy),month=Number(mo),day=Number(dd),minute=Number(mm),h=Number(hh);
+  if(h<1||h>12||minute>59||month<1||month>12||day<1)return null;
+  const check=new Date(Date.UTC(year,month-1,day));
+  if(check.getUTCFullYear()!==year||check.getUTCMonth()+1!==month||check.getUTCDate()!==day)return null;
+  const hour=h%12+(ap==='오후'?12:0);
+  return `${yy}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}T${String(hour).padStart(2,'0')}:${mm}`;
+ }
  const meridiem=s.match(/(오전|오후|AM|PM)/i);
  s=s.replace(/(오전|오후|AM|PM)/ig,'').trim();
  const m=s.match(/^(\d{4})[.\/-]\s*(\d{1,2})[.\/-]\s*(\d{1,2})\.?\s*(?:T|\s)\s*(\d{1,2}):(\d{2})(?::\d{2})?$/i);
