@@ -199,14 +199,19 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Ar
 .shell .quote-avatar .avatar{width:20px;height:20px;min-width:20px}
 .shell .quote-avatar svg{width:16px;height:16px}
 .shell .quote-card-content{padding:4px 12px 12px;margin:0!important;white-space:pre-wrap;font-size:15px;line-height:1.43}
-/* Six equal action hit-targets. The left/right inset reproduces X's screenshot rhythm. */
-.shell .tweet .actions{display:flex!important;justify-content:space-between!important;align-items:center!important;gap:0!important;min-width:0;max-width:100%;width:100%;box-sizing:border-box;margin:1px 0 0!important;padding:0 20px 0 7px!important;overflow:visible;color:var(--pia-x-muted)}
-.shell .tweet .action-slot{display:inline-flex;flex:0 0 34px;width:34px;height:34px;align-items:center;justify-content:center;min-width:0}
-.shell .tweet .action{display:inline-flex;align-items:center;justify-content:center;position:relative;flex:0 0 34px;min-width:34px;width:34px;height:34px;margin:0!important;padding:0!important;gap:0!important;line-height:1;background:transparent;border:0;border-radius:50%;color:inherit;cursor:default}
+/* X-like reaction bar: left reaction group + right utility group. */
+.shell .tweet .actions{display:flex!important;justify-content:space-between!important;align-items:center!important;gap:10px!important;min-width:0;max-width:100%;width:100%;box-sizing:border-box;margin:1px 0 0!important;padding:0 4px 0 0!important;overflow:visible;color:var(--pia-x-muted)}
+.shell .tweet .actions-main,.shell .tweet .actions-side{display:flex;align-items:center;min-width:0}
+.shell .tweet .actions-main{flex:1 1 auto;justify-content:space-between;max-width:365px;padding-right:8px}
+.shell .tweet .actions-side{flex:0 0 auto;gap:8px;margin-left:auto}
+.shell .tweet .action{display:inline-flex;align-items:center;justify-content:flex-start;position:relative;min-width:0;height:34px;margin:0!important;padding:0!important;gap:0;line-height:1;background:transparent;border:0;color:inherit;cursor:default}
 .shell .tweet button.action{cursor:pointer}
-.shell .tweet .action-icon{display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:999px;transition:background-color .14s ease}
-.shell .tweet .action svg{display:block;width:18px;height:18px;flex:0 0 18px;stroke-width:1.65}
-.shell .tweet .action-count{position:absolute;top:50%;left:30px;transform:translateY(-50%);margin:0;min-width:0;white-space:nowrap;font-size:12px;line-height:1;font-variant-numeric:tabular-nums;color:inherit;pointer-events:none}
+.shell .tweet .action-icon{display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:999px;transition:background-color .14s ease,color .14s ease;flex:0 0 34px}
+.shell .tweet .action svg{display:block;width:18px;height:18px;flex:0 0 18px;stroke-width:1.55}
+.shell .tweet .action-count{display:inline-flex;align-items:center;justify-content:flex-start;margin-left:-1px;min-width:0;white-space:nowrap;font-size:13px;line-height:1;font-variant-numeric:tabular-nums;color:inherit;pointer-events:none}
+.shell .tweet .action-count:empty{display:none}
+.shell .tweet .action-reply,.shell .tweet .action-repeat,.shell .tweet .action-heart,.shell .tweet .action-view{min-width:44px}
+.shell .tweet .action-bookmark,.shell .tweet .action-share{width:34px;justify-content:center}
 .shell .tweet .action-reply:hover,.shell .tweet .action-reply:focus-visible,.shell .tweet .action-view:hover,.shell .tweet .action-bookmark:hover,.shell .tweet .action-share:hover{color:var(--pia-x-blue)}
 .shell .tweet .action-reply:hover .action-icon,.shell .tweet .action-reply:focus-visible .action-icon,.shell .tweet .action-view:hover .action-icon,.shell .tweet .action-bookmark:hover .action-icon,.shell .tweet .action-share:hover .action-icon{background:rgba(29,155,240,.1)}
 .shell .tweet .action-repeat:hover{color:var(--pia-x-green)}
