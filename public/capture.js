@@ -1,4 +1,4 @@
-/* PIA v0.3.30 – 100% free browser-side OCR; no third-party image API, no server-side image uploads.
+/* PIA v0.3.31 – 100% free browser-side OCR; no third-party image API, no server-side image uploads.
    OCR program, WASM, and kor/eng traineddata are downloaded by Tesseract.js from public CDNs.
    Only reviewed, user-approved text is submitted to the existing PIA API. */
 (()=>{'use strict';
@@ -50,7 +50,10 @@ function dateFromText(source){
  }
  return {value:'',confirmed:false,source:'unreadable'};
 }
+// X replies: OCR often corrupts just the final '답글' (e.g. "관련성이 가장 높은 HE v").
+// A heading alone must NEVER create a new post: require neighboring reply-account cues.
 const xReplySeparator=line=>/^(?:[▽∨vV﹀⌄]\s*)?(?:관련성\s*이?\s*가장\s*높은\s*답글|답글\s*(?:모두\s*)?보기|모든\s*답글\s*보기|답글\s*정렬|답글\s*\d+\s*개|답글\s*\d+\s*건)(?:\s*[▽∨vV﹀⌄])?\s*$/u.test(String(line||'').trim());
+const xReplyHeading=line=>xReplySeparator(line)||/^\s*(?:[▽∨vV﹀⌄]\s*)?관련성\s*이?\s*가장\s*높은(?:\s+.{0,14})?\s*$/u.test(String(line||'').trim());
 const xReplyTo=line=>/@\s*[A-Za-z0-9_. ]{2,40}\s*님에게\s*보내는\s*답(?:글)?/u.test(String(line||''))||/님에게\s*보내는\s*답(?:글)?/u.test(String(line||''));
 const xUiHeader=line=>/^\s*[^\p{L}\p{N}]{0,6}\s*(?:게시하기|게시물|포스트|검색|홈|뒤로가기)\s*$/u.test(String(line||''));
 const xMetricsLine=line=>/^\s*(?:\d[\d,.천만KkMm]*\s*)?(?:마음에\s*들어요|조회수\s*\d*|리포스트|좋아요|북마크|공유)\s*(?:\d+[건회])?\s*$/u.test(String(line||''));
@@ -68,7 +71,7 @@ function xLineHandle(line){
 }
 function xCleanNickname(line){
  const value=String(line||'').trim().replace(/[↩←<>]+/g,'').replace(/[@#⋯.\s]+$/g,'').trim();
- if(!value||xUiHeader(value)||xReplyTo(value)||xMetricsLine(value)||xDateLine(value))return '';
+ if(!value||xUiHeader(value)||xReplyTo(value)||xReplyHeading(value)||xMetricsLine(value)||xDateLine(value))return '';
  if(/^[#@][A-Za-z0-9]{0,3}$/.test(value)||/^[#@©&=▦0-9\s]+$/.test(value)||/^관련성/.test(value))return '';
  return value.length<=48?value:'';
 }
@@ -76,7 +79,7 @@ function xHeader(lines){
  let best=null;
  for(let i=0;i<Math.min(lines.length,8);i++){
   const line=lines[i].trim();
-  if(xUiHeader(line)||xReplyTo(line)||xReplySeparator(line))continue;
+  if(xUiHeader(line)||xReplyTo(line)||xReplyHeading(line))continue;
   const found=xLineHandle(line);
   if(!found){
    // Preserve an uncertain author without inventing a truncated handle.
@@ -96,23 +99,41 @@ function xHeader(lines){
  }
  return best;
 }
+// Two independent signals are required for a weak OCR reply heading.
+// After a visible timestamp, a later "reply to" line can rescue a reply even
+// when the heading is absent or the @handle contains OCR spaces.
+const xAccountCue=line=>!!(xLineHandle(line)||xBrokenHandleLine(line));
+const xNearbyReplyTo=(lines,from,windowSize=9)=>lines.slice(from+1,Math.min(lines.length,from+1+windowSize)).some(xReplyTo);
 function xSegmentOcr(text){
- const lines=String(text||'').replace(/\r/g,'').split('\n');const segments=[];
+ const lines=String(text||'').replace(/\r/g,'').split('\n'),segments=[];
  let start=0,reply=false;
+ const push=(end)=>{const block=lines.slice(start,end).join('\n').trim();if(block)segments.push({text:block,reply})};
  for(let i=0;i<lines.length;i++){
-  if(xReplySeparator(lines[i])){
-   const block=lines.slice(start,i).join('\n').trim();if(block)segments.push({text:block,reply});
-   start=i+1;reply=true;continue;
+  const line=lines[i].trim();
+  // Visible metadata for the preceding post distinguishes a new reply card
+  // from an ordinary sentence containing '관련성이 가장 높은'.
+  const hasPreviousPost=i>start+3;
+  const previousMeta=hasPreviousPost&&lines.slice(start,i).some(s=>xDateLine(s)||xMetricsLine(s));
+  if(xReplyHeading(line)&&hasPreviousPost){
+   const nextLines=lines.slice(i+1,Math.min(lines.length,i+11));
+   const hasReplyLine=nextLines.some(xReplyTo);
+   const hasAccount=nextLines.some(xAccountCue);
+   if(previousMeta&&hasReplyLine&&hasAccount){
+    push(i);start=i+1;reply=true;continue;
+   }
   }
-  // Some screenshots have no visible reply heading: use a new account header
-  // after an X date/metrics row AND an explicit "reply to" label nearby.
-  if(i>start+4&&lines.slice(start,i).some(x=>xDateLine(x))&&xLineHandle(lines[i])&&
-     lines.slice(i+1,i+4).some(x=>xReplyTo(x))){
-   const block=lines.slice(start,i).join('\n').trim();if(block)segments.push({text:block,reply});
-   start=i;reply=true;
+  // No (readable) section heading: detect an author row followed by the
+  // explicit reply-to label, only after the previous post's date or metrics.
+  if(hasPreviousPost&&previousMeta&&xAccountCue(line)&&xNearbyReplyTo(lines,i,5)){
+   push(i);start=i;reply=true;continue;
+  }
+  // The account row itself may be unreadable. Keep the reply as an independent
+  // review item instead of silently discarding everything after the date.
+  if(hasPreviousPost&&previousMeta&&xReplyTo(line)){
+   push(i);start=i;reply=true;continue;
   }
  }
- const last=lines.slice(start).join('\n').trim();if(last)segments.push({text:last,reply});
+ push(lines.length);
  return segments.length?segments:[{text:String(text||''),reply:false}];
 }
 function parseCandidates(text){
@@ -128,7 +149,7 @@ function parseCandidates(text){
   const body=[];let ended=false;
   for(let i=0;i<lines.length;i++){
    const s=lines[i].trim();
-   if(ignored.has(i)||xUiHeader(s)||xReplySeparator(s)||xReplyTo(s))continue;
+   if(ignored.has(i)||xUiHeader(s)||xReplyTo(s))continue;
    if(i<Math.max(start,3)&&(/^\s*[#@&=©]{1,4}[a-z0-9]{0,2}\s*$/i.test(s)||xBrokenHandleLine(s)))continue;
    if(xDateLine(s)&&i>=start){ended=true;continue}
    if(ended)continue; // everything after X's date is metrics, toolbar, or another card
@@ -144,7 +165,7 @@ function parseCandidates(text){
   if(!header?.handle)reasons.push('작성자 헤더가 불명확함: 본문의 @멘션을 작성자로 사용하지 않았습니다.');
   if(!d.value)reasons.push('원본의 정확한 날짜·시각을 읽지 못했습니다.');
   else if(!d.confirmed)reasons.push('날짜만 인식: 12:00은 임시 시각이며 실제 작성 시간이 아닙니다.');
-  if(segment.reply||lines.slice(0,8).some(line=>xReplyTo(line)))reasons.push('답글로 구분됨: 부모 글 연결은 관리자 확인이 필요합니다.');
+  if(segment.reply||lines.slice(0,8).some(line=>xReplyTo(line)))reasons.push('답글 별도 후보: 원본 내용·작성자·날짜와 부모 글을 직접 확인하세요.');
   if(!content)reasons.push('본문이 비어 있어 원문 확인이 필요합니다.');
   const isReply=segment.reply||lines.slice(0,8).some(line=>xReplyTo(line));
   results.push({name:charLimit(header?.name||'',100),handle:header?.handle||'',content,date:d.value,dateReview:true,type:isReply?'reply':'original',reason:reasons.join(' '),block:results.length});
@@ -221,7 +242,7 @@ function renderAll(){renderImages();renderItems()}
 function findItem(id){return state.items.find(it=>it.id===id)}
 function setImageText(img,value){img.raw=value}
 function reparse(img,{confirmReplace=true}={}){if(state.items.some(it=>it.imageId===img.id&&it.decision==='registered')){message('이미 등록한 글이 있는 이미지입니다. 중복 후보를 생성하지 않도록 재분리를 막았습니다. 다른 게시물이 있다면 「게시물 직접 추가」를 이용하세요.',true);return}if(confirmReplace&&state.items.some(it=>it.imageId===img.id)){if(!confirm('이 이미지의 미등록 후보는 새 OCR 내용으로 교체됩니다. 직접 수정한 내용은 사라집니다. 등록 완료된 글은 DB에 유지됩니다. 계속할까요?'))return}
- const extracted=parseCandidates(img.raw);state.items=state.items.filter(it=>it.imageId!==img.id||it.decision==='registered');state.items.push(...extracted.map(t=>newItem(img,t)));renderAll();message(`${img.name}: ${extracted.length}개 후보를 만들었습니다. 원본과 확인해 주세요.`)}
+ const extracted=parseCandidates(img.raw);state.items=state.items.filter(it=>it.imageId!==img.id||it.decision==='registered');state.items.push(...extracted.map(t=>newItem(img,t)));renderAll();const replies=extracted.filter(t=>t.type==='reply').length;message(`${img.name}: ${extracted.length}개 후보 (답글 ${replies}건)를 만들었습니다. 원본과 확인해 주세요.`)}
 function normalizeCropRect(rect){if(!rect)return null;const x=Math.max(0,Math.min(1,Number(rect.x))),y=Math.max(0,Math.min(1,Number(rect.y)));
  const w=Math.max(0,Math.min(1-x,Number(rect.w))),h=Math.max(0,Math.min(1-y,Number(rect.h)));
  return [x,y,w,h].every(Number.isFinite)&&w>.012&&h>.012?{x,y,w,h}:null}
