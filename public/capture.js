@@ -1,11 +1,11 @@
-/* PIA v0.3.33 – 100% free browser-side OCR; no third-party image API, no server-side image uploads.
+/* PIA v0.3.34 – 100% free browser-side OCR; no third-party image API, no server-side image uploads.
    OCR program, WASM, and kor/eng traineddata are downloaded by Tesseract.js from public CDNs.
    Only reviewed, user-approved text is submitted to the existing PIA API. */
 (()=>{'use strict';
 const $=id=>document.getElementById(id);
 const escapeHtml=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const safeAttr=escapeHtml;
-const state={images:[],items:[],db:{accounts:[],posts:[]},seq:0,processing:false,cancel:false,worker:null,workerLoading:null,opened:false,regionRunning:false,ingestChain:Promise.resolve(),selectionDrag:null};
+const state={images:[],items:[],db:{accounts:[],posts:[]},seq:0,processing:false,cancel:false,worker:null,workerLoading:null,opened:false,regionRunning:false,ingestChain:Promise.resolve(),selectionDrag:null,paddleBusy:false};
 const MAX_FILES=20,MAX_BYTES=18*1024*1024,MAX_TOTAL=60,MAX_CANVAS_PIXELS=9000000;
 const OCR_SCRIPT='https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
 const norm=s=>String(s??'').normalize('NFKC').trim().replace(/\s+/gu,' ');
@@ -267,6 +267,41 @@ function ocrDiffSummary(a,b){
  }
  return {diff,examples};
 }
+// Experimental PaddleOCR result is a separate, opt-in comparison; it never registers posts.
+function paddleComparisonHtml(img){
+ const running=img.paddleStatus==='loading',ready=img.paddleStatus==='ready',failed=img.paddleStatus==='error';
+ const messageText=img.paddleMessage||'';
+ return `<section class="capture-paddle" aria-label="PaddleOCR 브라우저 시험 비교">
+  <div class="capture-paddle-head"><div><strong>시험 OCR · PaddleOCR.js (한국어 PP-OCRv5)</strong><small>무료 · 별도 설치 없음 · 선택한 이미지에서만 실행 · DB 자동 변경 없음</small></div><button type="button" data-image-action="paddle-run" data-id="${safeAttr(img.id)}" ${(!img.file||running||state.paddleBusy||state.processing||state.regionRunning)?'disabled':''}>${running?'시험 OCR 실행 중…':ready?'Paddle 다시 인식':'Paddle 시험 OCR 실행'}</button></div>
+  <div class="capture-paddle-status ${failed?'capture-paddle-error':''}" role="status" aria-live="polite">${escapeHtml(running?'모델 다운로드 및 브라우저 인식 중… 첫 실행은 오래 걸릴 수 있습니다.':failed?'시험 OCR 실패: '+messageText:ready?'시험 완료 · '+messageText:'아직 실행하지 않았습니다. 기존 Tesseract 인식 결과에는 영향이 없습니다.')}</div>
+  ${ready?`<div class="capture-compare-grid"><label>Tesseract 기존 기본 결과<textarea readonly spellcheck="false">${escapeHtml(img.baselineRaw||'')}</textarea></label><label>PaddleOCR 시험 결과<textarea readonly spellcheck="false" data-paddle-text="${safeAttr(img.id)}">${escapeHtml(img.paddleRaw||'')}</textarea></label></div><div class="capture-photo-tools"><button type="button" data-image-action="paddle-copy" data-id="${safeAttr(img.id)}">Paddle 텍스트 복사</button><button type="button" data-image-action="paddle-apply" data-id="${safeAttr(img.id)}" ${img.paddleRaw?'':'disabled'}>Paddle 결과를 검토 원문에 반영</button></div><small>원문 반영은 게시물 후보나 DB에 바로 적용되지 않습니다. 수동 검수 후 「이 텍스트로 게시물 다시 나누기」를 별도로 누르세요.</small>`:''}
+  ${failed?'<small>모델/CDN 다운로드 실패 또는 브라우저 호환성 오류일 수 있습니다. 기존 무료 OCR은 계속 사용할 수 있습니다.</small>':''}
+  </section>`;
+}
+async function runPaddleComparison(img){
+ if(!img?.file){message('JSON 초안에는 이미지가 들어 있지 않습니다. 캡처 원본을 다시 추가해 주세요.',true);return}
+ if(state.processing||state.regionRunning||state.paddleBusy){message('다른 인식 작업이 끝난 뒤 시험 OCR을 실행해 주세요.',true);return}
+ state.paddleBusy=true;img.paddleStatus='loading';img.paddleMessage='';renderImages();
+ try{
+  const {runPaddleOCR}=await import('/capture-paddle.mjs?v=34');
+  const result=await runPaddleOCR(img.file,(status)=>{if(img.paddleStatus==='loading'){img.paddleMessage=String(status||'').slice(0,200);const label=$('captureImages').querySelector(`[data-img="${img.id}"] .capture-paddle-status`);if(label)label.textContent=img.paddleMessage}});
+  if(!state.images.includes(img))return;
+  img.paddleRaw=result.text;img.paddleMetrics=result.metrics;img.paddleStatus='ready';
+  img.paddleMessage=`${result.count}개 텍스트 줄 · 평균 인식 점수 ${result.meanScore==null?'미제공':(result.meanScore*100).toFixed(1)+'%'} (OCR 점수는 정확도 보증이 아닙니다.)`;
+  message(`${img.name}: PaddleOCR 시험 결과가 준비됐습니다. 원본 이미지와 비교해 주세요.`);
+ }catch(error){if(!state.images.includes(img))return;img.paddleStatus='error';img.paddleMessage=String(error?.message||error).slice(0,500);message('PaddleOCR 시험 실패: '+img.paddleMessage,true)}
+ finally{state.paddleBusy=false;renderImages()}
+}
+function applyPaddleText(img){
+ if(img.paddleStatus!=='ready'||!img.paddleRaw)return;
+ if(img.raw!==img.paddleRaw&&!confirm('PaddleOCR 결과를 「현재 검토 중인 OCR 원문」에 복사할까요? 직접 고친 원문이 덮어써질 수 있습니다. 게시물 후보는 아직 변경되지 않습니다.'))return;
+ img.raw=img.paddleRaw;renderImages();message('검토 원문에만 반영했습니다. 원본과 대조한 뒤 게시물 다시 나누기를 눌러 주세요.');
+}
+async function copyPaddleText(img){
+ if(img.paddleStatus!=='ready')return;
+ try{await navigator.clipboard.writeText(img.paddleRaw||'');message('PaddleOCR 시험 결과를 복사했습니다.')}
+ catch(e){const textarea=$('captureImages').querySelector(`[data-paddle-text="${img.id}"]`);textarea?.focus();textarea?.select();message('자동 복사가 제한됐습니다. 선택된 텍스트를 Ctrl+C로 복사하세요.',true)}
+}
 function renderImages(){const node=$('captureImages');$('captureCount').textContent=state.images.length+'장';if(!state.images.length){node.innerHTML='<div class="empty">아직 추가한 이미지가 없습니다.</div>';return}
  node.innerHTML=state.images.map(img=>{
   const hasAlt=typeof img.altRaw==='string'&&img.altRaw.length>0;
@@ -274,6 +309,7 @@ function renderImages(){const node=$('captureImages');$('captureCount').textCont
   const highlighted=diff?diff.examples.map(x=>`<div class="capture-ocr-change"><b>${x.index}번째 줄</b><div>기본: ${escapeHtml(x.before||'(없음)')}</div><div>보정: ${escapeHtml(x.after||'(없음)')}</div></div>`).join(''):'';
   return `<article class="capture-image-card" data-img="${safeAttr(img.id)}"><div class="capture-card-head"><strong>${escapeHtml(img.name)}</strong><div class="capture-card-tools"><button type="button" data-image-action="scan" data-id="${safeAttr(img.id)}" ${img.status==='scanning'?'disabled':''}>다시 인식</button><button type="button" data-image-action="remove" data-id="${safeAttr(img.id)}">제거</button></div></div><div class="capture-photo-row"><div>${img.url?`<div class="capture-preview-scroller"><div class="capture-crop-surface" data-crop-image="${safeAttr(img.id)}" data-selecting="${img.selecting?'true':'false'}"><img class="capture-photo-preview" src="${safeAttr(img.url)}" alt="원본 ${safeAttr(img.name)}" draggable="false"><div class="capture-select-box" ${img.selection?`style="left:${img.selection.x*100}%;top:${img.selection.y*100}%;width:${img.selection.w*100}%;height:${img.selection.h*100}%;"`:'hidden'}></div></div></div><div class="capture-photo-tools"><a href="${safeAttr(img.url)}" target="_blank" rel="noopener noreferrer">원본 크기로 보기 ↗</a><button type="button" data-image-action="select" data-id="${safeAttr(img.id)}" ${img.file?'':'disabled'}>${img.selecting?'드래그 선택 취소':'작은 영역 직접 선택'}</button><button type="button" data-image-action="region" data-id="${safeAttr(img.id)}" ${img.selection&&img.file?'':'disabled'}>선택 영역 정밀 재인식</button></div><small>"작은 영역 직접 선택"을 누르고 이미지에서 마우스로 범위를 드래그하세요. 결과는 원문에 자동 합치지 않습니다.</small>${img.regionRaw!=null?`<label class="capture-region-result">선택 영역 재인식 결과<textarea readonly class="capture-region-text" data-region-result="${safeAttr(img.id)}">${escapeHtml(img.regionRaw)}</textarea></label><div class="capture-photo-tools"><button type="button" data-image-action="copy-region" data-id="${safeAttr(img.id)}">영역 텍스트 복사</button><button type="button" data-image-action="append-region" data-id="${safeAttr(img.id)}">전체 OCR에 추가 (확인 후)</button></div>`:''}`:'<div class="capture-no-preview">JSON에서 불러온 기록입니다. 이미지 미리보기는 없습니다.</div>'}</div><div><div class="capture-ocr-meta">${escapeHtml(img.status==='scanning'?'인식 중…':img.status==='done'?'인식 완료':img.status==='error'?'OCR 실패 · 수동 입력 가능':img.status==='queued'?'인식 대기':img.status==='paused'?'대기 중지':'텍스트 검토')} ${img.confidence==null?'':`· 기본 인식 신뢰도 ${Math.round(img.confidence)}% (참고)`} ${hasAlt&&img.altConfidence!=null?`· 보정 인식 ${Math.round(img.altConfidence)}% (참고)`:''}</div>
   ${hasAlt?`<div class="capture-variant"><strong>원본 OCR ↔ 확대·대비 보정 OCR</strong><span>서로 다른 줄 약 ${diff.diff}개 · 높은 신뢰도가 항상 정답은 아닙니다.</span><div class="capture-compare-grid"><label>기본 결과<textarea readonly spellcheck="false">${escapeHtml(img.baselineRaw||'')}</textarea></label><label>보정 결과<textarea readonly spellcheck="false">${escapeHtml(img.altRaw)}</textarea></label></div><div class="capture-compare-changes">${highlighted||'<span>줄별 비교에서 차이가 없습니다.</span>'}${diff.diff>diff.examples.length?`<small>그 외 차이 ${diff.diff-diff.examples.length}개 · 전체 결과는 위에서 비교하세요.</small>`:''}</div><div class="capture-photo-tools"><button type="button" data-image-action="use-basic" data-id="${safeAttr(img.id)}">기본 결과 적용</button><button type="button" data-image-action="use-enhanced" data-id="${safeAttr(img.id)}">보정 결과 적용</button></div></div>`:''}
+  ${paddleComparisonHtml(img)}
   <label>현재 검토 중인 OCR 원문<textarea class="capture-ocr-text" data-image-text="${safeAttr(img.id)}" spellcheck="false" placeholder="OCR 결과를 수정해 주세요.">${escapeHtml(img.raw||'')}</textarea></label><div class="capture-photo-tools"><button type="button" data-image-action="parse" data-id="${safeAttr(img.id)}">이 텍스트로 게시물 다시 나누기</button><button type="button" data-image-action="add" data-id="${safeAttr(img.id)}">게시물 직접 추가</button></div><small>게시물 ${state.items.filter(i=>i.imageId===img.id).length}건 · 재분리하면 미등록 후보의 수정 내용이 교체됩니다. 등록 완료된 글은 DB에서 삭제되지 않습니다.</small></div></div></article>`;
  }).join('');
 }
@@ -395,7 +431,7 @@ async function ingestFiles(incoming,source='file'){let accepted=0;if(incoming.le
   if(file.size>MAX_BYTES){message(`${file.name}은 18MB가 넘어서 건너뜁니다.`,true);continue}
   if(state.images.length>=MAX_TOTAL){message(`브라우저 메모리 보호를 위해 대기열은 최대 ${MAX_TOTAL}장입니다. 검토 초안을 저장한 뒤 대기열을 비우고 다시 진행하세요.`,true);break}
   const hash=await fileHash(file);if(state.images.some(img=>img.hash===hash)){message(`${file.name}: 동일 이미지가 이미 대기열에 있습니다.`);continue}
-  const img={id:'i'+(++state.seq),name:file.name,file,hash,url:URL.createObjectURL(file),status:'queued',raw:'',baselineRaw:'',altRaw:'',regionRaw:null,confidence:null,altConfidence:null,selection:null,selecting:false};state.images.push(img);accepted++;
+  const img={id:'i'+(++state.seq),name:file.name,file,hash,url:URL.createObjectURL(file),status:'queued',raw:'',baselineRaw:'',altRaw:'',regionRaw:null,confidence:null,altConfidence:null,paddleRaw:'',paddleStatus:'idle',paddleMessage:'',paddleMetrics:null,selection:null,selecting:false};state.images.push(img);accepted++;
  }
  if(accepted){renderAll();message(`${source==='paste'?'클립보드':'이미지'} ${accepted}장 추가됨 · 현재 ${state.images.length}장. 순서대로 인식합니다.`);processQueue()}
 }
@@ -487,10 +523,10 @@ async function saveItem(it){if(it.saving||it.decision==='registered'||it.decisio
  }catch(e){message('게시물 저장 실패: '+e.message,true)}finally{it.saving=false;renderItems()}}
 function deleteImg(img){if(!img)return;if(img.status==='scanning'){message('현재 인식 중인 이미지는 완료 후 제거할 수 있습니다.',true);return}if(state.items.some(it=>it.imageId===img.id&&it.decision==='registered')){if(!confirm('등록된 게시물은 DB에 유지됩니다. 이미지와 검토 기록만 제거할까요?'))return}
  if(img.url)URL.revokeObjectURL(img.url);state.images=state.images.filter(i=>i.id!==img.id);state.items=state.items.filter(it=>it.imageId!==img.id);renderAll()}
-function saveDraft(){const draft={format:'pia-capture-draft-v1',created_at:new Date().toISOString(),images:state.images.map(({id,name,hash,status,raw,baselineRaw,altRaw,confidence,altConfidence,regionRaw})=>({id,name,hash,status:'manual',raw,baselineRaw,altRaw,confidence,altConfidence,regionRaw})),items:state.items.map(it=>{const {saving,checking,...rest}=it;return rest})};const url=URL.createObjectURL(new Blob([JSON.stringify(draft,null,2)],{type:'application/json;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='pia-capture-review-draft.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),2000);message('검토 초안 저장 완료. 원본 이미지는 JSON에 포함되지 않습니다.')}
+function saveDraft(){const draft={format:'pia-capture-draft-v1',created_at:new Date().toISOString(),images:state.images.map(({id,name,hash,status,raw,baselineRaw,altRaw,confidence,altConfidence,regionRaw,paddleRaw,paddleStatus,paddleMessage,paddleMetrics})=>({id,name,hash,status:'manual',raw,baselineRaw,altRaw,confidence,altConfidence,regionRaw,paddleRaw:paddleStatus==='ready'?paddleRaw:'',paddleStatus:paddleStatus==='ready'?'ready':'idle',paddleMessage:paddleStatus==='ready'?paddleMessage:'',paddleMetrics:paddleStatus==='ready'?paddleMetrics:null})),items:state.items.map(it=>{const {saving,checking,...rest}=it;return rest})};const url=URL.createObjectURL(new Blob([JSON.stringify(draft,null,2)],{type:'application/json;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='pia-capture-review-draft.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),2000);message('검토 초안 저장 완료. 원본 이미지는 JSON에 포함되지 않습니다.')}
 async function loadDraft(file){try{if(state.processing)throw Error('현재 이미지 인식 중입니다. 대기열을 중지하고 다시 시도해 주세요.');const body=JSON.parse(await file.text());if(body.format!=='pia-capture-draft-v1'||!Array.isArray(body.images)||!Array.isArray(body.items))throw Error('PIA 캡처 초안 형식이 아닙니다.');if(body.items.length>3000||body.images.length>3000)throw Error('너무 많은 기록입니다.');if((state.images.length||state.items.length)&&!confirm('현재 미등록 검토 대기열을 모두 교체할까요? DB의 기존 등록 글은 삭제되지 않습니다.'))return;
  for(const img of state.images)if(img.url)URL.revokeObjectURL(img.url);
- state.images=body.images.map((v,i)=>({id:'i'+(i+1),name:charLimit(v.name,200)||'원본 파일',hash:String(v.hash||''),status:'manual',raw:charLimit(v.raw,300000),baselineRaw:charLimit(v.baselineRaw,300000),altRaw:charLimit(v.altRaw,300000),regionRaw:v.regionRaw==null?null:charLimit(v.regionRaw,300000),confidence:Number.isFinite(v.confidence)?v.confidence:null,altConfidence:Number.isFinite(v.altConfidence)?v.altConfidence:null,selection:null,selecting:false,url:null,file:null}));
+ state.images=body.images.map((v,i)=>({id:'i'+(i+1),name:charLimit(v.name,200)||'원본 파일',hash:String(v.hash||''),status:'manual',raw:charLimit(v.raw,300000),baselineRaw:charLimit(v.baselineRaw,300000),altRaw:charLimit(v.altRaw,300000),regionRaw:v.regionRaw==null?null:charLimit(v.regionRaw,300000),confidence:Number.isFinite(v.confidence)?v.confidence:null,altConfidence:Number.isFinite(v.altConfidence)?v.altConfidence:null,paddleRaw:charLimit(v.paddleRaw,300000),paddleStatus:v.paddleStatus==='ready'?'ready':'idle',paddleMessage:charLimit(v.paddleMessage,200),paddleMetrics:v.paddleMetrics&&typeof v.paddleMetrics==='object'?v.paddleMetrics:null,selection:null,selecting:false,url:null,file:null}));
  const ids=new Map(body.images.map((v,i)=>[String(v.id),'i'+(i+1)]));
  state.items=body.items.map((v,i)=>({id:'c'+(i+1),imageId:ids.get(String(v.imageId))||state.images[0]?.id||'',sourceName:charLimit(v.sourceName,200),name:charLimit(v.name,100),handle:charLimit(v.handle,30),accountId:String(v.accountId||''),content:charLimit(v.content,10000),date:charLimit(v.date,19),dateBasis:['missing','visible-date','visible-exact','parent-plus-5','manual'].includes(v.dateBasis)?v.dateBasis:(v.date?'manual':'missing'),dateReview:v.dateBasis==='parent-plus-5'||v.dateReview!==false,type:['original','reply','quote'].includes(v.type)?v.type:'original',parentId:String(v.parentId||''),quotePostId:String(v.quotePostId||''),quoteName:charLimit(v.quoteName,100),quoteHandle:charLimit(v.quoteHandle,30),quoteContent:charLimit(v.quoteContent,10000),quoteDate:charLimit(v.quoteDate,19),parentSearch:charLimit(v.parentSearch,120),quoteSearch:charLimit(v.quoteSearch,120),decision:['pending','hold','excluded','registered','linked'].includes(v.decision)?v.decision:'hold',linkedPostId:String(v.linkedPostId||''),manualSeparate:true,checking:false,saving:false,resultId:String(v.resultId||''),reason:charLimit(v.reason,300),allowDistinct:false}));
  for(const it of state.items){if(it.decision==='linked'&&(!it.linkedPostId||!reusableOriginalHits(it).some(h=>String(h.post.id)===String(it.linkedPostId)))){it.decision='hold';it.linkedPostId='';it.reason='초안의 기존 원글 연결 대상을 DB에서 찾지 못했습니다. 다시 확인하세요.'}}
@@ -522,6 +558,9 @@ $('captureImages').addEventListener('click',async e=>{const button=e.target.clos
  case 'parse':reparse(img);break;
  case 'add':state.items.push(newItem(img,{reason:'직접 분리한 게시물입니다. 원본을 확인해 주세요.'}));renderItems();break;
  case 'scan':if(!img.file){message('원본 이미지가 없습니다. 이미지를 다시 추가해 주세요.',true);return}if(state.items.some(it=>it.imageId===img.id&&it.decision!=='registered')&&!confirm('다시 인식하면 이 이미지의 미등록 후보 편집 내용이 사라집니다. 계속할까요?'))return;if(state.processing||state.regionRunning){message('현재 다른 이미지를 인식하는 중입니다.',true);return}img.status='queued';processQueue();break;
+ case 'paddle-run':await runPaddleComparison(img);break;
+ case 'paddle-copy':await copyPaddleText(img);break;
+ case 'paddle-apply':applyPaddleText(img);break;
  case 'use-basic':await useVariant(img,'basic');break;
  case 'use-enhanced':await useVariant(img,'enhanced');break;
  case 'select':img.selecting=!img.selecting;img.selection=null;renderImages();message(img.selecting?'이미지에서 읽을 부분을 드래그해 사각형으로 선택하세요.':'영역 선택을 취소했습니다.');break;

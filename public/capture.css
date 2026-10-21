@@ -115,3 +115,19 @@
 .capture-linked-info>strong{display:block;color:#146342;font-size:13px}
 .capture-linked-info a{color:#155b8a;text-decoration:underline}
 .capture-final-actions>small{align-self:center;font-size:12px;max-width:500px;color:#536471;line-height:1.4}
+
+
+/* v0.3.34 — isolated experimental PaddleOCR.js browser comparison */
+.capture-paddle{border:1px solid #b7d4dd;background:#f4f9fb;border-radius:11px;padding:12px;margin:13px 0}
+.capture-paddle-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.capture-paddle-head>div{flex:1 1 200px;min-width:0}
+.capture-paddle-head strong{display:block;font-size:13px;color:#145469}
+.capture-paddle-head small{display:block;margin-top:4px;font-size:11px;line-height:1.6;color:#496a79}
+.capture-paddle-head button{background:#197797;color:#fff;border:0;border-radius:8px;padding:10px 12px;font-size:12px;font-weight:800;cursor:pointer}
+.capture-paddle-head button:disabled{opacity:.55;cursor:not-allowed}
+.capture-paddle-status{font-size:12px;color:#375d6d;line-height:1.6;margin:8px 0;overflow-wrap:anywhere}
+.capture-paddle-error{color:#9b3637}
+.capture-paddle .capture-compare-grid{margin:9px 0 6px}
+.capture-paddle .capture-compare-grid textarea{height:190px}
+.capture-paddle>small{display:block;font-size:11px;color:#546e78;line-height:1.6;margin-top:7px}
+@media(max-width:560px){.capture-paddle{padding:10px}.capture-paddle-head button{width:100%}.capture-paddle .capture-compare-grid textarea{height:140px}}
