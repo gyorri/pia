@@ -393,3 +393,43 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Ar
  margin:0 0 2px!important;
  padding:6px 0 0!important;
 }
+
+
+/* v0.3.24 — X mobile detailed post: separate 5-icon toolbar from 6-icon feed. */
+.shell .tweet-detail .detail-time{display:flex;align-items:baseline;flex-wrap:wrap;column-gap:0;row-gap:2px;padding:2px 0 14px!important;margin:0!important;font-size:14px;line-height:1.55;color:var(--pia-x-muted)}
+.shell .tweet-detail .detail-time-date{white-space:normal}
+.shell .tweet-detail .detail-time-views{display:inline;white-space:nowrap;color:var(--pia-x-muted)}
+.shell .tweet-detail .detail-time-views::before{content:"·";margin:0 7px;color:var(--pia-x-muted)}
+.shell .tweet-detail .detail-time-views strong{font-weight:700;color:var(--pia-x-text)}
+/* Specificity is intentional: the original mobile rules force equal six-action slots. */
+.shell .tweet.tweet-detail .actions.detail-actions{
+ display:flex!important;align-items:center!important;justify-content:space-between!important;
+ width:100%!important;max-width:100%!important;min-width:0!important;
+ margin:0 0 2px!important;padding:6px 7px 0 2px!important;
+ gap:0!important;border-top:1px solid var(--pia-x-line);overflow:visible;
+}
+.shell .tweet.tweet-detail .actions.detail-actions>.action{
+ display:inline-flex!important;flex:0 0 28px!important;width:28px!important;
+ min-width:28px!important;height:36px!important;margin:0!important;
+ padding:0!important;align-items:center!important;justify-content:center!important;
+ position:relative!important;gap:0!important;
+}
+.shell .tweet.tweet-detail .actions.detail-actions>.action>.action-icon{
+ display:flex!important;flex:0 0 28px!important;width:28px!important;height:36px!important;
+ align-items:center!important;justify-content:center!important;border-radius:999px;
+}
+.shell .tweet.tweet-detail .actions.detail-actions>.action svg{width:19px!important;height:19px!important;flex:0 0 19px!important;stroke-width:1.8}
+.shell .tweet.tweet-detail .actions.detail-actions>.action .action-count{
+ position:absolute!important;left:29px!important;top:50%!important;
+ transform:translateY(-50%)!important;font-size:12px!important;
+ margin:0!important;line-height:1!important;white-space:nowrap;
+}
+@media(max-width:600px){
+ .shell .tweet.tweet-detail .actions.detail-actions{padding:5px 6px 0 1px!important}
+ .shell .tweet.tweet-detail .actions.detail-actions>.action{width:28px!important;min-width:28px!important;flex-basis:28px!important}
+ .shell .tweet.tweet-detail .actions.detail-actions>.action>.action-icon{width:28px!important;flex-basis:28px!important}
+}
+@media(max-width:360px){
+ .shell .tweet.tweet-detail .actions.detail-actions{padding-right:4px!important;padding-left:0!important}
+ .shell .tweet.tweet-detail .actions.detail-actions>.action .action-count{font-size:11px!important}
+}
