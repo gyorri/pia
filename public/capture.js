@@ -1,4 +1,4 @@
-/* PIA v0.3.29 – 100% free browser-side OCR; no third-party image API, no server-side image uploads.
+/* PIA v0.3.30 – 100% free browser-side OCR; no third-party image API, no server-side image uploads.
    OCR program, WASM, and kor/eng traineddata are downloaded by Tesseract.js from public CDNs.
    Only reviewed, user-approved text is submitted to the existing PIA API. */
 (()=>{'use strict';
@@ -23,59 +23,136 @@ const progress=text=>{$('captureProgress').textContent=text};
 async function api(route,payload){const response=await fetch('/api/'+route,{method:payload?'POST':'GET',credentials:'same-origin',cache:'no-store',headers:payload?{'Content-Type':'application/json'}:{},body:payload?JSON.stringify(payload):undefined});const d=await response.json().catch(()=>({}));if(!response.ok){const e=new Error(d.error||`서버 오류 ${response.status}`);e.status=response.status;throw e}return d}
 async function refreshDb(){state.db=await api('admin-data');renderItems();message(`DB 목록 갱신 완료: 게시물 ${state.db.posts.length}건`)}
 async function auth(){try{const session=await api('session');if(!session.authenticated)throw Error('로그인이 필요합니다.');state.db=await api('admin-data');state.opened=true;$('captureWorkspace').hidden=false;$('captureGate').hidden=true;renderAll()}catch(e){state.opened=false;$('captureWorkspace').hidden=true;$('captureGate').hidden=false;message(e.message,true)}}
+// PIA v0.3.30: X screenshot metadata detection. Never use a body mention as the author.
+const xDatePattern=/(20\d{2})\s*년\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일|(20\d{2})\s*[.\-/]\s*(\d{1,2})\s*[.\-/]\s*(\d{1,2})\s*\.?/;
 function dateFromText(source){
- const text=String(source||'').normalize('NFKC').replace(/\s+/g,' ');
- const yr='(20\\d{2})',month='(\\d{1,2})',day='(\\d{1,2})';
- let y,m,d,h='',min='',period='';
- const find1=text.match(new RegExp(`(오전|오후)\\s*(\\d{1,2}):(\\d{2})(?:\\s*[·•|]\\s*)?${yr}년\\s*${month}월\\s*${day}일`));
- const find2=text.match(new RegExp(`${yr}년\\s*${month}월\\s*${day}일(?:\\s*[·•|]\\s*|\\s+)(오전|오후)\\s*(\\d{1,2}):(\\d{2})`));
- const find3=text.match(/(20\d{2})\s*[.\-/]\s*(\d{1,2})\s*[.\-/]\s*(\d{1,2})\s*\.?\s*[·•]?\s*(오전|오후)\s*(\d{1,2}):(\d{2})/);
- const find4=text.match(/(20\d{2})년\s*(\d{1,2})월\s*(\d{1,2})일/);
- const find5=text.match(/(20\d{2})[.\-/]\s*(\d{1,2})[.\-/]\s*(\d{1,2})/);
- if(find1){[,period,h,min,y,m,d]=find1}else if(find2||find3){[,y,m,d,period,h,min]=find2||find3}else if(find4||find5){[,y,m,d]=find4||find5}else return {value:'',confirmed:false,source:'unreadable'};
- const yy=Number(y),mm=Number(m),dd=Number(d),date=new Date(Date.UTC(yy,mm-1,dd));if(date.getUTCFullYear()!==yy||date.getUTCMonth()!==mm-1||date.getUTCDate()!==dd)return {value:'',confirmed:false,source:'invalid'};
- let full=false,hh=12,mi=0;
- if(h&&min){hh=Number(h);mi=Number(min);if(hh<1||hh>12||mi>59)return {value:'',confirmed:false,source:'invalid'};hh=(hh%12)+(period==='오후'?12:0);full=true}
- const value=`${y}-${String(mm).padStart(2,'0')}-${String(dd).padStart(2,'0')}T${String(hh).padStart(2,'0')}:${String(mi).padStart(2,'0')}`;
- return {value,confirmed:full,source:full?'visible datetime':'visible date only'};
+ const text=String(source||'').replace(/[ㆍᆞ•∙⋅・]/g,'·').replace(/\u00a0/g,' ');
+ const dates=[...text.matchAll(new RegExp(xDatePattern.source,'g'))];
+ for(const match of dates){
+  const y=Number(match[1]||match[4]),m=Number(match[2]||match[5]),d=Number(match[3]||match[6]);
+  const valid=new Date(Date.UTC(y,m-1,d));
+  if(valid.getUTCFullYear()!==y||valid.getUTCMonth()!==m-1||valid.getUTCDate()!==d)continue;
+  // The timestamp must be adjacent to the *same* date, not a reply below it.
+  const lineStart=text.lastIndexOf('\n',match.index)+1;
+  const lineEnd=text.indexOf('\n',match.index);
+  const line=text.slice(lineStart,lineEnd===-1?text.length:lineEnd);
+  const times=[...line.matchAll(/(오전|오후)\s*(\d{1,2})\s*:\s*(\d{2})|(\d{1,2})\s*:\s*(\d{2})\s*(오전|오후)/g)];
+  let hh=12,mi=0,confirmed=false;
+  for(const t of times){
+   const period=t[1]||t[6],hour=Number(t[2]||t[4]),minute=Number(t[3]||t[5]);
+   const lineDateIndex=match.index-lineStart;
+   const distance=t.index+t[0].length<lineDateIndex?lineDateIndex-(t.index+t[0].length):t.index>lineDateIndex+match[0].length?t.index-(lineDateIndex+match[0].length):0;
+   if(distance>25||hour<1||hour>12||minute>59)continue;
+   hh=hour%12+(period==='오후'?12:0);mi=minute;confirmed=true;break;
+  }
+  const value=`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}T${String(hh).padStart(2,'0')}:${String(mi).padStart(2,'0')}`;
+  return {value,confirmed,source:confirmed?'visible datetime':'visible date only'};
+ }
+ return {value:'',confirmed:false,source:'unreadable'};
+}
+const xReplySeparator=line=>/^(?:[▽∨vV﹀⌄]\s*)?(?:관련성\s*이?\s*가장\s*높은\s*답글|답글\s*(?:모두\s*)?보기|모든\s*답글\s*보기|답글\s*정렬|답글\s*\d+\s*개|답글\s*\d+\s*건)(?:\s*[▽∨vV﹀⌄])?\s*$/u.test(String(line||'').trim());
+const xReplyTo=line=>/@\s*[A-Za-z0-9_. ]{2,40}\s*님에게\s*보내는\s*답(?:글)?/u.test(String(line||''))||/님에게\s*보내는\s*답(?:글)?/u.test(String(line||''));
+const xUiHeader=line=>/^\s*[^\p{L}\p{N}]{0,6}\s*(?:게시하기|게시물|포스트|검색|홈|뒤로가기)\s*$/u.test(String(line||''));
+const xMetricsLine=line=>/^\s*(?:\d[\d,.천만KkMm]*\s*)?(?:마음에\s*들어요|조회수\s*\d*|리포스트|좋아요|북마크|공유)\s*(?:\d+[건회])?\s*$/u.test(String(line||''));
+const xDateLine=line=>xDatePattern.test(String(line||''))&&(/\d{1,2}\s*:\s*\d{2}|조회수|^\s*20\d{2}/.test(String(line||'')));
+const xBrokenHandleLine=line=>/^(?:[^\n@]{0,22}\s+)?@[A-Za-z0-9_]{2,20}\s+[A-Za-z0-9_]{2,20}(?:\s*[-–].*)?$/u.test(String(line||'').trim());
+function xLineHandle(line){
+ const s=String(line||'').trim();
+ // Standalone handle (handle+relative time), and one-line "nickname @handle" account headers.
+ const m=s.match(/(?:^|\s)@([A-Za-z0-9_]{2,30})(?=\s*(?:$|[·•ㆍᆞ|]|[-–]\s*(?:\d{1,2}시|\d{1,2}[시간A-Za-z])))/);
+ if(!m)return null;
+ const after=s.slice(m.index+m[0].length).trim();
+ if(/^[A-Za-z_]{2,}\b/.test(after))return null; // "@drt CHRM" is ambiguous; never truncate to "drt".
+ const before=s.slice(0,m.index).replace(/^[\s\d@#⋯.\-]+/g,'').replace(/[\s@#⋯.\-]+$/g,'').trim();
+ return {handle:m[1],name:before};
+}
+function xCleanNickname(line){
+ const value=String(line||'').trim().replace(/[↩←<>]+/g,'').replace(/[@#⋯.\s]+$/g,'').trim();
+ if(!value||xUiHeader(value)||xReplyTo(value)||xMetricsLine(value)||xDateLine(value))return '';
+ if(/^[#@][A-Za-z0-9]{0,3}$/.test(value)||/^[#@©&=▦0-9\s]+$/.test(value)||/^관련성/.test(value))return '';
+ return value.length<=48?value:'';
+}
+function xHeader(lines){
+ let best=null;
+ for(let i=0;i<Math.min(lines.length,8);i++){
+  const line=lines[i].trim();
+  if(xUiHeader(line)||xReplyTo(line)||xReplySeparator(line))continue;
+  const found=xLineHandle(line);
+  if(!found){
+   // Preserve an uncertain author without inventing a truncated handle.
+   if(xBrokenHandleLine(line)){
+    const previous=i>0?xCleanNickname(lines[i-1]):'';
+    return {index:i,name:previous,handle:'',nameIndex:previous?i-1:-1};
+   }
+   continue;
+  }
+  // A mention inside text must not be interpreted as an account header.
+  const lead=found.name,previous=i>0?xCleanNickname(lines[i-1]):'';
+  const singleAccount=/^\s*@[A-Za-z0-9_]{2,30}(?:\s*[·•ㆍᆞ].*)?\s*$/.test(line);
+  if(!lead&&!singleAccount&&!previous)continue;
+  let name=lead||previous;
+  if(/^[@#]/.test(name))name='';
+  best={index:i,name,handle:found.handle,nameIndex:!lead&&previous?i-1:-1};break;
+ }
+ return best;
+}
+function xSegmentOcr(text){
+ const lines=String(text||'').replace(/\r/g,'').split('\n');const segments=[];
+ let start=0,reply=false;
+ for(let i=0;i<lines.length;i++){
+  if(xReplySeparator(lines[i])){
+   const block=lines.slice(start,i).join('\n').trim();if(block)segments.push({text:block,reply});
+   start=i+1;reply=true;continue;
+  }
+  // Some screenshots have no visible reply heading: use a new account header
+  // after an X date/metrics row AND an explicit "reply to" label nearby.
+  if(i>start+4&&lines.slice(start,i).some(x=>xDateLine(x))&&xLineHandle(lines[i])&&
+     lines.slice(i+1,i+4).some(x=>xReplyTo(x))){
+   const block=lines.slice(start,i).join('\n').trim();if(block)segments.push({text:block,reply});
+   start=i;reply=true;
+  }
+ }
+ const last=lines.slice(start).join('\n').trim();if(last)segments.push({text:last,reply});
+ return segments.length?segments:[{text:String(text||''),reply:false}];
 }
 function parseCandidates(text){
- const raw=String(text??'').replace(/\r/g,'').trim(),lines=raw.split('\n');
- if(!raw)return [{name:'',handle:'',content:'',date:'',dateReview:true,reason:'인식한 글자가 없습니다. 원문을 직접 입력해 주세요.'}];
- const marks=[];
- lines.forEach((line,i)=>{const match=line.match(/^\s*(?:[^@\n]{0,40}\s+)?@([A-Za-z0-9_]{2,30})(?:\s|$|[·•])/);if(match&&i>0)marks.push(i)});
- // Split only at lines resembling account headers (prefer blank separators / nearby X dates).
- const boundaries=[0];for(const m of marks){
-  if(m<=boundaries[boundaries.length-1]+2)continue;
-  const next=(lines[m+1]||'').trim(),prev=(lines[m-1]||'').trim();
-  const strongHeader=/^\s*[^@\n]{1,35}\s+@[A-Za-z0-9_]{2,30}\s*(?:[·•].*)?$/.test(lines[m]);
-  const dateNeighbor=/(?:오전|오후)\s*\d{1,2}:\d\d|20\d{2}년\s*\d+월|20\d{2}[.\-/]\d{1,2}/.test(next);
-  if(!prev||(strongHeader&&dateNeighbor))boundaries.push(m)
- }
- const blocks=boundaries.map((start,i)=>lines.slice(start,boundaries[i+1]??lines.length).join('\n').trim()).filter(Boolean);
- return blocks.map((block,index)=>{
-  const bLines=block.split('\n').map(x=>x.trimEnd());let detectedHandle='',name='';
-  let headerIdx=-1;
-  for(let i=0;i<Math.min(6,bLines.length);i++){
-   const line=bLines[i].trim();const inline=line.match(/^(.{1,45}?)\s+@([A-Za-z0-9_]{2,30})(?:\s*[·•].*)?$/);
-   const only=line.match(/^@([A-Za-z0-9_]{2,30})(?:\s*[·•].*)?$/);
-   if(inline||only){detectedHandle=(inline||only)[2]||(only&&only[1])||'';name=inline?inline[1].trim():i>0?bLines[i-1].trim().slice(0,100):'';headerIdx=i;break}
+ const raw=String(text??'').replace(/\r/g,'').trim();
+ if(!raw)return [{name:'',handle:'',content:'',date:'',dateReview:true,reason:'인식한 글자가 없습니다. 원문을 직접 입력해 주세요.',type:'original'}];
+ const segments=xSegmentOcr(raw);const results=[];
+ for(const segment of segments){
+  const lines=segment.text.split('\n').map(s=>s.trimEnd());
+  const header=xHeader(lines);
+  const start=header?header.index+1:0;
+  const ignored=new Set(header?[header.index,...(header.nameIndex>=0?[header.nameIndex]:[])]:[]);
+  const d=dateFromText(segment.text);
+  const body=[];let ended=false;
+  for(let i=0;i<lines.length;i++){
+   const s=lines[i].trim();
+   if(ignored.has(i)||xUiHeader(s)||xReplySeparator(s)||xReplyTo(s))continue;
+   if(i<Math.max(start,3)&&(/^\s*[#@&=©]{1,4}[a-z0-9]{0,2}\s*$/i.test(s)||xBrokenHandleLine(s)))continue;
+   if(xDateLine(s)&&i>=start){ended=true;continue}
+   if(ended)continue; // everything after X's date is metrics, toolbar, or another card
+   if(i<start)continue;
+   if(xMetricsLine(s)&&body.length){ended=true;continue}
+   // Ignore isolated toolbar OCR noise, but never silently "correct" ordinary Korean sentences.
+   if(/^[©®◁▷↑↓↪↩↗↘\s0-9QΙ|\/=]+$/.test(s)&&body.length)continue;
+   body.push(lines[i]);
   }
-  if(!detectedHandle){const mt=block.match(/@([A-Za-z0-9_]{2,30})/);if(mt)detectedHandle=mt[1]}
-  const parsedDate=dateFromText(block);
-  const scrub=bLines.filter((l,i)=>{
-   if(i===headerIdx||(i===headerIdx-1&&name&&l.trim()===name))return false;
-   if(/^\s*(?:\d[\d,.만천KkMm]*)?\s*조회수\s*$/.test(l))return false;
-   if(/^(?:오전|오후)\s*\d{1,2}:\d\d\s*[·•]?\s*20\d{2}년.*$/.test(l.trim()))return false;
-   if(/^20\d{2}년\s*\d+월\s*\d+일.*(?:오전|오후)\s*\d+:\d\d/.test(l.trim()))return false;
-   if(/^[\s·•]*(?:답글|리포스트|마음에 들어요|좋아요|북마크|공유|보기)[\s·•]*$/.test(l))return false;
-   return true;
-  });
-  const content=scrub.join('\n').trim().slice(0,10000);
-  return {name:charLimit(name,100),handle:detectedHandle,content,date:parsedDate.value,dateReview:true,reason:parsedDate.confirmed?'원본 시각이 감지됐지만 사람이 확인해야 합니다.':parsedDate.value?'날짜만 감지됨: 12:00은 임시 시각입니다.':'원본 날짜를 인식하지 못했습니다.',block:index};
- });
+  const content=body.join('\n').trim().slice(0,10000);
+  if(!content&&!header&&!segment.reply)continue;
+  const reasons=[];
+  if(!header?.handle)reasons.push('작성자 헤더가 불명확함: 본문의 @멘션을 작성자로 사용하지 않았습니다.');
+  if(!d.value)reasons.push('원본의 정확한 날짜·시각을 읽지 못했습니다.');
+  else if(!d.confirmed)reasons.push('날짜만 인식: 12:00은 임시 시각이며 실제 작성 시간이 아닙니다.');
+  if(segment.reply||lines.slice(0,8).some(line=>xReplyTo(line)))reasons.push('답글로 구분됨: 부모 글 연결은 관리자 확인이 필요합니다.');
+  if(!content)reasons.push('본문이 비어 있어 원문 확인이 필요합니다.');
+  const isReply=segment.reply||lines.slice(0,8).some(line=>xReplyTo(line));
+  results.push({name:charLimit(header?.name||'',100),handle:header?.handle||'',content,date:d.value,dateReview:true,type:isReply?'reply':'original',reason:reasons.join(' '),block:results.length});
+ }
+ return results.length?results:[{name:'',handle:'',content:raw,date:'',dateReview:true,reason:'게시물 구조를 자동 분리하지 못했습니다. 원문과 비교해 직접 수정하세요.',type:'original'}];
 }
-function newItem(image,extracted={}){return {id:'c'+(++state.seq),imageId:image.id,sourceName:image.name,name:extracted.name||'',handle:extracted.handle||'',accountId:'',content:extracted.content||'',date:extracted.date||'',dateReview:extracted.dateReview!==false,type:'original',parentId:'',quotePostId:'',quoteName:'',quoteHandle:'',quoteContent:'',quoteDate:'',parentSearch:'',quoteSearch:'',decision:'pending',manualSeparate:false,checking:false,saving:false,resultId:'',reason:extracted.reason||'',allowDistinct:false};}
+
+function newItem(image,extracted={}){return {id:'c'+(++state.seq),imageId:image.id,sourceName:image.name,name:extracted.name||'',handle:extracted.handle||'',accountId:'',content:extracted.content||'',date:extracted.date||'',dateReview:extracted.dateReview!==false,type:extracted.type||'original',parentId:'',quotePostId:'',quoteName:'',quoteHandle:'',quoteContent:'',quoteDate:'',parentSearch:'',quoteSearch:'',decision:'pending',manualSeparate:false,checking:false,saving:false,resultId:'',reason:extracted.reason||'',allowDistinct:false};}
 function sameBody(a,b){return normBody(a)===normBody(b)}
 function similarBody(a,b){a=normBody(a);b=normBody(b);if(!a||!b)return 0;if(a===b)return 1;if(Math.min(a.length,b.length)>40&&(a.includes(b)||b.includes(a)))return Math.min(a.length,b.length)/Math.max(a.length,b.length);if(a.length>850||b.length>850){a=a.slice(0,850);b=b.slice(0,850)}if(Math.max(a.length,b.length)/Math.max(1,Math.min(a.length,b.length))>1.3)return 0;
  // Damerau-free edit distance with two rows; bounded for local UI responsiveness.
@@ -120,10 +197,13 @@ function renderItems(){const filter=$('captureFilter').value,display=state.items
   };
   const parentOptions=postSearch(it.parentSearch,it.parentId);
   const quoteOptions=postSearch(it.quoteSearch,it.quotePostId);
+  const suggestedAuthors=[...new Set(state.items.filter(x=>x.imageId===it.imageId&&x.id!==it.id&&handleValid(x.handle)).map(x=>x.handle))].filter(h=>normHandle(h)!==normHandle(it.handle));
+  const hintHtml=!it.handle&&suggestedAuthors.length?`<div class="capture-wide capture-author-suggest">같은 캡처의 다른 글에서 ${suggestedAuthors.map(h=>`<button type="button" class="secondary" data-action="suggest-author" data-handle="${safeAttr(h)}" ${locked}>@${escapeHtml(h)} 확인 후 사용</button>`).join(' ')} · 같은 계정인지 캡처를 보고 선택하세요.</div>`:'';
   return `<article class="capture-candidate" data-item="${safeAttr(it.id)}" aria-busy="${it.saving?'true':'false'}"><div class="capture-card-head"><strong>${escapeHtml(it.sourceName)} · 후보 ${ix+1}</strong><span class="capture-state ${it.decision}">${({pending:'검토 대기',hold:'보류',excluded:'제외',registered:'등록 완료'})[it.decision]}</span></div>
   <div class="capture-candidate-main"><div class="capture-form-grid">
    <label>OCR 작성자 닉네임<input data-key="name" maxlength="100" value="${safeAttr(it.name)}" ${locked} placeholder="원본에서 확인"></label>
    <label>@아이디<input data-key="handle" maxlength="30" value="${safeAttr(it.handle)}" ${locked} placeholder="@ 없이 입력"></label>
+   ${hintHtml}
    <label class="capture-wide">PIA 작성 계정 선택<select data-key="accountId" ${locked}><option value="">@아이디로 기존 계정 자동 검색</option>${accountChoices}</select><small>계정이 없으면 아래에서 새 계정 등록(명시적 승인)</small></label>
    <div class="capture-wide capture-inline"><small>계정이 목록에 없다면 닉네임과 @아이디를 확인하세요.</small><button type="button" data-action="create-account" ${locked}>이 작성자 계정 등록</button></div>
    <label>게시물 유형<select data-key="type" ${locked}><option value="original">일반 게시물</option><option value="reply">답글</option><option value="quote">인용 게시물</option></select></label>
@@ -200,7 +280,7 @@ async function scanImage(img){if(!img.file||state.cancel)return;img.status='scan
  if(($('captureMode')?.value||'precise')==='precise'&&!state.cancel){
   try{progress(`${img.name}: 확대·대비 보정본을 추가로 인식하는 중…`);
    const bitmap=await loadBitmap(img.file);let canvas;try{canvas=canvasForSource(bitmap,null,{enhance:true})}finally{bitmap.close?.()}
-   const revised=await performOCR(worker,canvas,6);
+   const revised=await performOCR(worker,canvas,3);
    img.altRaw=String(revised?.data?.text||'');img.altConfidence=Number.isFinite(revised?.data?.confidence)?revised.data.confidence:null;
    // Accuracy cannot be determined from OCR confidence alone: preserve the original and ask the user to compare.
    img.bestSuggestion=rankOcrText(img.altRaw,img.altConfidence)>rankOcrText(baseline,baseConf)?'enhanced':'basic';
@@ -320,6 +400,7 @@ $('captureImages').addEventListener('pointercancel',()=>{state.selectionDrag=nul
 $('captureCandidates').addEventListener('input',e=>{const card=e.target.closest('[data-item]'),it=card&&findItem(card.dataset.item),key=e.target.dataset.key;if(!it||!key)return;updateItemField(it,key,e.target.type==='checkbox'?e.target.checked:e.target.value)})
 $('captureCandidates').addEventListener('change',e=>{const card=e.target.closest('[data-item]'),it=card&&findItem(card.dataset.item),key=e.target.dataset.key;if(!it||!key)return;updateItemField(it,key,e.target.type==='checkbox'?e.target.checked:e.target.value);if(key==='date'&&it.date){it.reason='수동으로 날짜를 수정했습니다. 원본 확인 전까지 날짜수정필요를 유지하세요.'}renderItems()})
 $('captureCandidates').addEventListener('click',e=>{const button=e.target.closest('[data-action]');if(!button)return;const card=button.closest('[data-item]'),it=card&&findItem(card.dataset.item);if(!it)return;const act=button.dataset.action;
+ if(act==='suggest-author'){const h=button.dataset.handle;if(!handleValid(h))return;if(!confirm(`이 게시물의 작성자가 @${h}가 맞나요? 원본 캡처의 작성자 영역을 확인한 경우에만 선택해 주세요.`))return;updateItemField(it,'handle',h);const acct=getAccountByHandle(h);if(acct)it.name=acct.name;renderItems();return}
  if(act==='create-account'){createAccount(it);return}if(act==='save'){saveItem(it);return}
  if(act==='duplicate'){const img=state.images.find(x=>x.id===it.imageId);if(img){state.items.splice(state.items.indexOf(it)+1,0,newItem(img,{name:it.name,handle:it.handle,date:it.date,dateReview:true,reason:'캡처에 함께 있는 다른 게시물입니다. 본문을 입력하세요.'}));renderItems()}return}
  if(['hold','pending','exclude'].includes(act)){it.decision=act==='exclude'?'excluded':act;renderItems();message(act==='exclude'?'이 후보는 등록하지 않습니다. 원본 이미지는 보존됩니다.':act==='hold'?'검토 보류로 변경했습니다.':'검토 대기로 되돌렸습니다.')}});
