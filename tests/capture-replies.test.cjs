@@ -112,10 +112,10 @@ EE EE]
 둘 @bob_2 · 4시
 @drt_CHRM 님에게 보내는 답글
 두 번째 답글 본문`,expected:2},
- {name:'unreadable original date does not fabricate reply date',text:`참
+ {name:'original has only date (12:00 placeholder), no inherit',text:`참
 @drt_CHRM
 원글 본문
-2026년 1월 16일 · 12:33 오전
+2026년 1월 16일
 관련성이 가장 높은 HE v
 둘 @bob_2 · 4시
 @drt_CHRM 님에게 보내는 답글
@@ -126,7 +126,21 @@ for(const c of cases){
  assert.equal(result.length,c.expected,`${c.name}: expected ${c.expected} posts, got ${result.length}, ${JSON.stringify(result)}`);
  if(c.expected>1){
   assert.equal(result[0].type,'original',`${c.name} first must be original`);
-  for(const p of result.slice(1)){ assert.equal(p.type,'reply',`${c.name}: missing reply`); if(c.name!=='two replies after first timestamp, no repeated heading'||!p.content.includes('첫 답글'))assert.equal(p.date,'',`${c.name}: reply must not inherit datetime`); assert(p.content.includes('본문')||p.content.includes('그리고'),`${c.name}: missing reply body`); }
+  for(const p of result.slice(1)){
+   assert.equal(p.type,'reply',`${c.name}: missing reply`);
+   if(c.name==='original has only date (12:00 placeholder), no inherit'){
+    assert.equal(p.date,'',`${c.name}: cannot inherit unverified original clock`);
+   }else if(c.name==='two replies after first timestamp, no repeated heading'&&p.content.includes('첫 답글')){
+    assert.equal(p.date,'2026-01-16T14:00',`${c.name}: explicitly visible reply time wins`);
+   }else if(c.name==='two replies after first timestamp, no repeated heading'&&p.content.includes('두 번째')){
+    assert.equal(p.date,'2026-01-16T00:38',`${c.name}: matching parent +5 if no own clock`);
+   }else{
+    assert.equal(p.date,'2026-01-16T00:38',`${c.name}: reply +5 minute provisional date`);
+    assert.equal(p.dateBasis,'parent-plus-5');
+    assert.equal(p.dateReview,true);
+   }
+   assert(p.content.includes('본문')||p.content.includes('그리고'),`${c.name}: missing reply body`);
+  }
   assert(!result[0].content.includes('그리고 일론'),`${c.name}: leaked reply into original`);
  }
  if(c.name==='false positive: heading-like text is tweet content not a reply header') assert(result[0].content.includes('관련성이 가장 높은 답글'), 'ordinary tweet content was discarded');
@@ -140,4 +154,71 @@ for(const c of cases){
  }
  console.log(`PASS ${c.name}: ${result.map(x=>`${x.type}:${x.content.slice(0,20).replace(/\n/g,' ')}${x.date?`:${x.date}`:''}`).join(' | ')}`);
 }
-console.log(`${cases.length} regression cases passed.`);
+
+const extraCases=[
+ {name:'mismatched addressee does not inherit',text:`원글이름
+@first_user
+본문 글입니다.
+2026년 1월 16일 · 12:33 오전 · 조회수 1회
+관련성이 가장 높은 답글
+답글이름 @reply_user · 8시
+@other_user 님에게 보내는 답글
+답글 내용입니다.`, expected:''},
+ {name:'explicit reply clock is respected',text:`원글이름
+@first_user
+본문 글입니다.
+2026년 1월 16일 · 12:33 오전 · 조회수 1회
+관련성이 가장 높은 답글
+답글이름 @reply_user · 8시
+@first_user 님에게 보내는 답글
+답글 내용입니다.
+2026년 1월 16일 · 9:22 오전 · 조회수 1회`,expected:'2026-01-16T09:22'},
+ {name:'reply date only matching the original day inherits +5',text:`원글이름
+@first_user
+본문 글입니다.
+2026년 1월 16일 · 12:33 오전 · 조회수 1회
+관련성이 가장 높은 답글
+답글이름 @reply_user · 8시
+@first_user 님에게 보내는 답글
+답글 내용입니다.
+2026년 1월 16일`,expected:'2026-01-16T00:38'},
+ {name:'reply date only different day not overwritten',text:`원글이름
+@first_user
+본문 글입니다.
+2026년 1월 16일 · 12:33 오전 · 조회수 1회
+관련성이 가장 높은 답글
+답글이름 @reply_user · 8시
+@first_user 님에게 보내는 답글
+답글 내용입니다.
+2026년 1월 17일`,expected:'2026-01-17T12:00'},
+ {name:'midnight rollover applies',text:`원글이름
+@first_user
+본문 글입니다.
+2026년 1월 16일 · 11:58 오후 · 조회수 1회
+관련성이 가장 높은 답글
+답글이름 @reply_user · 8시
+@first_user 님에게 보내는 답글
+답글 내용입니다.`,expected:'2026-01-17T00:03'}
+];
+for(const c of extraCases){
+ const got=run(c.text);
+ assert.equal(got.length,2,c.name+': expected 2 candidates');
+ assert.equal(got[1].date,c.expected,c.name+': incorrect inherited time');
+ assert.equal(got[1].dateReview,true,c.name+': review flag must stay on');
+ console.log('PASS',c.name,got[1].date||'(blank)');
+}
+assert.equal(run(`참
+@drt_CHRM
+원글입니다
+2026년 1월 16일
+관련성이 가장 높은 답글
+답글 @abc_1 · 8시
+@drt_CHRM 님에게 보내는 답글
+둘째 본문`)[1].date,'','date-only parent must not invent a precise time');
+const testFns=vm.runInNewContext(`const message=()=>{};const state={db:{accounts:[],posts:[]}};const getPostById=id=>state.db.posts.find(p=>p.id===id);const getAccountByHandle=()=>null;const getAccountById=()=>null;${source.slice(source.indexOf('function updateItemField('),source.indexOf('async function createAccount('))};updateItemField;`,{});
+const estimated={type:'reply',decision:'pending',date:'2026-01-16T00:38',dateBasis:'parent-plus-5',dateReview:true,allowDistinct:false};
+testFns(estimated,'dateReview',false);assert.equal(estimated.dateReview,true,'cannot uncheck unconfirmed +5 flag');
+testFns(estimated,'date','2026-01-16T00:39');assert.equal(estimated.dateBasis,'manual','manual edit must disarm auto-inheritance');
+console.log('PASS estimated flag cannot be silently confirmed; manual date edit opts out');
+
+console.log(`${cases.length+extraCases.length} regression cases passed.`);

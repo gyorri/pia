@@ -1,4 +1,4 @@
-/* PIA v0.3.31 – 100% free browser-side OCR; no third-party image API, no server-side image uploads.
+/* PIA v0.3.32 – 100% free browser-side OCR; no third-party image API, no server-side image uploads.
    OCR program, WASM, and kor/eng traineddata are downloaded by Tesseract.js from public CDNs.
    Only reviewed, user-approved text is submitted to the existing PIA API. */
 (()=>{'use strict';
@@ -59,6 +59,42 @@ const xUiHeader=line=>/^\s*[^\p{L}\p{N}]{0,6}\s*(?:게시하기|게시물|포스
 const xMetricsLine=line=>/^\s*(?:\d[\d,.천만KkMm]*\s*)?(?:마음에\s*들어요|조회수\s*\d*|리포스트|좋아요|북마크|공유)\s*(?:\d+[건회])?\s*$/u.test(String(line||''));
 const xDateLine=line=>xDatePattern.test(String(line||''))&&(/\d{1,2}\s*:\s*\d{2}|조회수|^\s*20\d{2}/.test(String(line||'')));
 const xBrokenHandleLine=line=>/^(?:[^\n@]{0,22}\s+)?@[A-Za-z0-9_]{2,20}\s+[A-Za-z0-9_]{2,20}(?:\s*[-–].*)?$/u.test(String(line||'').trim());
+
+// A screenshot can show an original followed by its own reply. Use only a
+// visible original date+clock and a matching "replying to @..." cue for a
+// provisional +5-minute reply timestamp. Never infer a parent relationship.
+const xAuthorFingerprint=value=>String(value||'').toLowerCase().replace(/[^a-z0-9]/g,'');
+function xVisibleAuthorKey(segment,header){
+ const lines=String(segment||'').split('\n');
+ const last=Math.min(lines.length,Math.max(6,(header?.index??0)+1));
+ for(let i=0;i<last;i++){
+  const line=lines[i].trim();
+  if(xReplyTo(line)||xDateLine(line))break;
+  const m=line.match(/@\s*([a-z0-9_]+(?:[.\s_]+[a-z0-9_]+){0,2})(?=\s*$|\s*[·•ㆍᆞ|\-–])/i)
+    ||line.match(/^@\s*([a-z0-9_]+(?:[.\s_]+[a-z0-9_]+){0,2})\s*$/i);
+  if(m)return xAuthorFingerprint(m[1]);
+ }
+ return xAuthorFingerprint(header?.handle||'');
+}
+function xReplyRecipientKey(segment){
+ const line=String(segment||'').split('\n').find(xReplyTo)||'';
+ const m=line.match(/@\s*([a-z0-9_. ]{2,50}?)\s*님에게\s*보내는\s*답(?:글)?/i);
+ return m?xAuthorFingerprint(m[1]):'';
+}
+function xAddFiveMinutesKst(local){
+ if(!/^20\d{2}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(String(local||'')))return '';
+ const ms=Date.parse(`${local}:00+09:00`);
+ if(!Number.isFinite(ms))return '';
+ const back=new Date(ms+9*3600000).toISOString().slice(0,16);
+ if(back!==local)return ''; // reject impossible dates such as February 30
+ return new Date(ms+5*60*1000+9*3600000).toISOString().slice(0,16);
+}
+function xAddFiveMinutesToStoredPost(post){
+ if(!post||!(post.date_needs_review===false||post.date_needs_review===0)||!post.posted_at)return '';
+ const ms=Date.parse(post.posted_at);
+ return Number.isFinite(ms)?new Date(ms+5*60*1000+9*3600000).toISOString().slice(0,16):'';
+}
+
 function xLineHandle(line){
  const s=String(line||'').trim();
  // Standalone handle (handle+relative time), and one-line "nickname @handle" account headers.
@@ -139,7 +175,7 @@ function xSegmentOcr(text){
 function parseCandidates(text){
  const raw=String(text??'').replace(/\r/g,'').trim();
  if(!raw)return [{name:'',handle:'',content:'',date:'',dateReview:true,reason:'인식한 글자가 없습니다. 원문을 직접 입력해 주세요.',type:'original'}];
- const segments=xSegmentOcr(raw);const results=[];
+ const segments=xSegmentOcr(raw);const results=[];const originalTimes=[];
  for(const segment of segments){
   const lines=segment.text.split('\n').map(s=>s.trimEnd());
   const header=xHeader(lines);
@@ -162,18 +198,33 @@ function parseCandidates(text){
   const content=body.join('\n').trim().slice(0,10000);
   if(!content&&!header&&!segment.reply)continue;
   const reasons=[];
+  const isReply=segment.reply||lines.slice(0,8).some(line=>xReplyTo(line));
+  let assignedDate=d.value,dateBasis=d.confirmed?'visible-exact':d.value?'visible-date':'missing';
+  // No original timestamp is invented. A *matching* same-image original must
+  // have an actually visible clock time, not a 12:00 date-only placeholder.
+  if(isReply&&!d.confirmed){
+   const recipient=xReplyRecipientKey(segment.text);
+   const parent=[...originalTimes].reverse().find(x=>recipient&&x.authorKey===recipient);
+   if(parent){
+    const suggested=xAddFiveMinutesKst(parent.date);
+    if(suggested&&(!d.value||d.value.slice(0,10)===suggested.slice(0,10))){
+     assignedDate=suggested;dateBasis='parent-plus-5';
+     reasons.push(`동일 캡처의 원글 ${parent.date.replace('T',' ')} +5분 → ${assignedDate.replace('T',' ')} (임시 시각, 원글·답글 관계 확인 필요).`);
+    }
+   }
+  }
   if(!header?.handle)reasons.push('작성자 헤더가 불명확함: 본문의 @멘션을 작성자로 사용하지 않았습니다.');
-  if(!d.value)reasons.push('원본의 정확한 날짜·시각을 읽지 못했습니다.');
-  else if(!d.confirmed)reasons.push('날짜만 인식: 12:00은 임시 시각이며 실제 작성 시간이 아닙니다.');
+  if(!d.value&&dateBasis!=='parent-plus-5')reasons.push('원본의 정확한 날짜·시각을 읽지 못했습니다.');
+  else if(!d.confirmed&&dateBasis!=='parent-plus-5')reasons.push('날짜만 인식: 12:00은 임시 시각이며 실제 작성 시간이 아닙니다.');
   if(segment.reply||lines.slice(0,8).some(line=>xReplyTo(line)))reasons.push('답글 별도 후보: 원본 내용·작성자·날짜와 부모 글을 직접 확인하세요.');
   if(!content)reasons.push('본문이 비어 있어 원문 확인이 필요합니다.');
-  const isReply=segment.reply||lines.slice(0,8).some(line=>xReplyTo(line));
-  results.push({name:charLimit(header?.name||'',100),handle:header?.handle||'',content,date:d.value,dateReview:true,type:isReply?'reply':'original',reason:reasons.join(' '),block:results.length});
+  results.push({name:charLimit(header?.name||'',100),handle:header?.handle||'',content,date:assignedDate,dateBasis,dateReview:true,type:isReply?'reply':'original',reason:reasons.join(' '),block:results.length});
+  if(!isReply&&d.confirmed&&d.value){const authorKey=xVisibleAuthorKey(segment.text,header);if(authorKey)originalTimes.push({date:d.value,authorKey});}
  }
  return results.length?results:[{name:'',handle:'',content:raw,date:'',dateReview:true,reason:'게시물 구조를 자동 분리하지 못했습니다. 원문과 비교해 직접 수정하세요.',type:'original'}];
 }
 
-function newItem(image,extracted={}){return {id:'c'+(++state.seq),imageId:image.id,sourceName:image.name,name:extracted.name||'',handle:extracted.handle||'',accountId:'',content:extracted.content||'',date:extracted.date||'',dateReview:extracted.dateReview!==false,type:extracted.type||'original',parentId:'',quotePostId:'',quoteName:'',quoteHandle:'',quoteContent:'',quoteDate:'',parentSearch:'',quoteSearch:'',decision:'pending',manualSeparate:false,checking:false,saving:false,resultId:'',reason:extracted.reason||'',allowDistinct:false};}
+function newItem(image,extracted={}){return {id:'c'+(++state.seq),imageId:image.id,sourceName:image.name,name:extracted.name||'',handle:extracted.handle||'',accountId:'',content:extracted.content||'',date:extracted.date||'',dateBasis:extracted.dateBasis||(extracted.date?'manual':'missing'),dateReview:extracted.dateReview!==false,type:extracted.type||'original',parentId:'',quotePostId:'',quoteName:'',quoteHandle:'',quoteContent:'',quoteDate:'',parentSearch:'',quoteSearch:'',decision:'pending',manualSeparate:false,checking:false,saving:false,resultId:'',reason:extracted.reason||'',allowDistinct:false};}
 function sameBody(a,b){return normBody(a)===normBody(b)}
 function similarBody(a,b){a=normBody(a);b=normBody(b);if(!a||!b)return 0;if(a===b)return 1;if(Math.min(a.length,b.length)>40&&(a.includes(b)||b.includes(a)))return Math.min(a.length,b.length)/Math.max(a.length,b.length);if(a.length>850||b.length>850){a=a.slice(0,850);b=b.slice(0,850)}if(Math.max(a.length,b.length)/Math.max(1,Math.min(a.length,b.length))>1.3)return 0;
  // Damerau-free edit distance with two rows; bounded for local UI responsiveness.
@@ -210,7 +261,7 @@ function renderItems(){const filter=$('captureFilter').value,display=state.items
  const accounts=state.db.accounts;const accountChoices=accounts.map(a=>`<option value="${safeAttr(a.id)}">${escapeHtml(a.name)} (@${escapeHtml(a.handle)})</option>`).join('');
  const allPosts=state.db.posts;
  box.innerHTML=display.map((it,ix)=>{
-  const hits=duplicateHits(it),dateOnly=it.reason.includes('날짜만'),reg=it.decision==='registered',locked=reg?'disabled':'';
+  const hits=duplicateHits(it),dateOnly=it.dateBasis==='visible-date'||it.reason.includes('날짜만'),estimated=it.dateBasis==='parent-plus-5',reg=it.decision==='registered',locked=reg?'disabled':'';
   const postSearch=(text,selected)=>{
    const q=norm(text).toLowerCase();const list=allPosts.filter(p=>p.id!==it.resultId).filter(p=>{const author=getAccountById(p.account_id);return !q||[p.content,author?.handle,author?.name].some(v=>String(v||'').toLowerCase().includes(q))}).slice(0,80);
    if(selected&&!list.some(p=>String(p.id)===String(selected))){const selectedPost=getPostById(selected);if(selectedPost)list.unshift(selectedPost)}
@@ -228,12 +279,12 @@ function renderItems(){const filter=$('captureFilter').value,display=state.items
    <label class="capture-wide">PIA 작성 계정 선택<select data-key="accountId" ${locked}><option value="">@아이디로 기존 계정 자동 검색</option>${accountChoices}</select><small>계정이 없으면 아래에서 새 계정 등록(명시적 승인)</small></label>
    <div class="capture-wide capture-inline"><small>계정이 목록에 없다면 닉네임과 @아이디를 확인하세요.</small><button type="button" data-action="create-account" ${locked}>이 작성자 계정 등록</button></div>
    <label>게시물 유형<select data-key="type" ${locked}><option value="original">일반 게시물</option><option value="reply">답글</option><option value="quote">인용 게시물</option></select></label>
-   <label>원본 작성일시(KST)<input type="datetime-local" data-key="date" step="60" value="${safeAttr(it.date)}" ${locked}><small>${dateOnly?'시각은 OCR에서 확인되지 않아 12:00을 임시 기입했습니다.': '원본 날짜가 불확실하면 직접 확인하세요.'}</small></label>
+   <label>원본 작성일시(KST)<input type="datetime-local" data-key="date" step="60" value="${safeAttr(it.date)}" ${locked}><small>${estimated?'원글 작성 시각 +5분으로 자동 입력한 임시 시각입니다. 실제 답글 시간은 확인되지 않았으며 날짜수정필요를 유지하세요.':dateOnly?'시각은 OCR에서 확인되지 않아 12:00을 임시 기입했습니다.':'원본 날짜가 불확실하면 직접 확인하세요.'}</small></label>
    <label class="capture-wide capture-checkbox"><input type="checkbox" data-key="dateReview" ${it.dateReview?'checked':''} ${locked}> 날짜수정필요(원본 시각 미확정이면 반드시 유지)</label>
    <label class="capture-wide">게시물 본문<textarea data-key="content" rows="6" maxlength="10000" ${locked} placeholder="원본 이미지와 비교하여 수정하세요.">${escapeHtml(it.content)}</textarea></label>
    ${it.type==='reply'?`<label class="capture-wide">답글 대상 원글 검색<input data-key="parentSearch" type="search" value="${safeAttr(it.parentSearch)}" placeholder="원글 본문 또는 @아이디 입력 후 엔터/화면 밖 클릭" ${locked}><small>기존 게시물 전체에서 검색합니다.</small></label><label class="capture-wide">답글 대상 원글 (직접 확인 필수)<select data-key="parentId" ${locked}><option value="">답글을 연결할 게시물 선택</option>${parentOptions}</select><small>잘못 연결하지 않도록 자동 선택하지 않습니다.</small></label>`:''}
    ${it.type==='quote'?`<label class="capture-wide">인용 원문 검색<input data-key="quoteSearch" type="search" value="${safeAttr(it.quoteSearch)}" placeholder="원글 본문 또는 @아이디 입력 후 엔터/화면 밖 클릭" ${locked}></label><label class="capture-wide">기존 게시물 인용 연결 (선택)<select data-key="quotePostId" ${locked}><option value="">원문 정보를 직접 입력</option>${quoteOptions}</select></label><label>인용 원문 닉네임<input data-key="quoteName" value="${safeAttr(it.quoteName)}" ${locked}></label><label>인용 원문 @아이디<input data-key="quoteHandle" value="${safeAttr(it.quoteHandle)}" ${locked}></label><label class="capture-wide">인용 원문 본문<textarea data-key="quoteContent" ${locked}>${escapeHtml(it.quoteContent)}</textarea></label><label class="capture-wide">인용 원문 날짜(KST, 선택)<input type="datetime-local" data-key="quoteDate" value="${safeAttr(it.quoteDate)}" ${locked}></label>`:''}
-  </div><aside class="capture-side"><h3>기존 게시물 중복 비교</h3>${duplicateHtml(it)}<p>작성자가 다르거나 이미지 인식 오타가 있으면 중복을 놓칠 수 있습니다. 반드시 원본과 비교하세요.</p>${hits.some(x=>x.exact)?`<label class="capture-checkbox"><input type="checkbox" data-key="allowDistinct" ${it.allowDistinct?'checked':''} ${locked}> 동일 본문이지만 서로 다른 게시물임을 날짜로 확인했습니다.</label>`:''}${it.reason?`<p>OCR 메모: ${escapeHtml(it.reason)}</p>`:''}${reg?`<p><strong>등록 ID:</strong> ${escapeHtml(it.resultId)}</p>`:''}</aside></div>
+  </div><aside class="capture-side"><h3>기존 게시물 중복 비교</h3>${duplicateHtml(it)}<p>작성자가 다르거나 이미지 인식 오타가 있으면 중복을 놓칠 수 있습니다. 반드시 원본과 비교하세요.</p>${hits.some(x=>x.exact)?`<label class="capture-checkbox"><input type="checkbox" data-key="allowDistinct" ${it.allowDistinct?'checked':''} ${locked}> 동일 본문이지만 서로 다른 게시물임을 날짜로 확인했습니다.</label>`:''}${estimated?'<p class="capture-estimate-note">시각 추정: 원글 +5분 · 실제 작성 시각이 아닙니다.</p>':''}${it.reason?`<p>OCR 메모: ${escapeHtml(it.reason)}</p>`:''}${reg?`<p><strong>등록 ID:</strong> ${escapeHtml(it.resultId)}</p>`:''}</aside></div>
   <div class="capture-final-actions">${reg?`<a class="capture-link" href="/#/post/${encodeURIComponent(it.resultId)}" target="_blank" rel="noopener">등록 게시물 보기 ↗</a>`:`<button class="primary" type="button" data-action="save" ${(it.saving||it.decision!=='pending')?'disabled':''}>중복 검사 후 등록</button><button class="secondary" type="button" data-action="hold" ${it.saving?'disabled':''}>보류</button><button class="secondary" type="button" data-action="pending">검토 대기</button><button class="danger" type="button" data-action="exclude">제외</button><button class="secondary" type="button" data-action="duplicate">이 이미지에서 글 추가</button>`}</div></article>`;
  }).join('');
  for(const it of display){const card=box.querySelector(`[data-item="${it.id}"]`);if(!card)continue;const select=card.querySelector('[data-key=accountId]');if(select)select.value=it.accountId||'';const ty=card.querySelector('[data-key=type]');if(ty)ty.value=it.type;const par=card.querySelector('[data-key=parentId]');if(par)par.value=it.parentId||'';const quote=card.querySelector('[data-key=quotePostId]');if(quote)quote.value=it.quotePostId||''}
@@ -328,13 +379,40 @@ function addFiles(files,source='file'){
  state.ingestChain=state.ingestChain.catch(()=>{}).then(()=>ingestFiles(incoming,source)).catch(e=>message('이미지 추가 실패: '+e.message,true));
  return state.ingestChain;
 }
-function updateItemField(it,key,value){if(!it||it.decision==='registered')return;if(key==='dateReview'||key==='allowDistinct')it[key]=!!value;else it[key]=String(value);if(key==='handle'){const acct=getAccountByHandle(value);it.accountId=acct?.id||''}if(key==='accountId'&&value){const acct=getAccountById(value);if(acct){it.handle=acct.handle;it.name=acct.name}}if(key==='date'&&it.date)it.dateReview=true;if(key==='content'||key==='date'||key==='handle'||key==='accountId')it.allowDistinct=false}
+function updateItemField(it,key,value){
+ if(!it||it.decision==='registered')return;
+ if(key==='dateReview'&&it.dateBasis==='parent-plus-5'&&!value){
+  it.dateReview=true;message('원글 +5분은 임시 시각입니다. 실제 시간을 확인해 날짜를 직접 수정한 후 체크를 해제하세요.',true);return;
+ }
+ if(key==='dateReview'||key==='allowDistinct')it[key]=!!value;else it[key]=String(value);
+ if(key==='handle'){const acct=getAccountByHandle(value);it.accountId=acct?.id||''}
+ if(key==='accountId'&&value){const acct=getAccountById(value);if(acct){it.handle=acct.handle;it.name=acct.name}}
+ if(key==='type'&&value!=='reply'&&it.dateBasis==='parent-plus-5'){
+  // An estimated reply time cannot survive a switch to a different post type.
+  it.date='';it.dateBasis='missing';it.dateReview=true;
+ }
+ if(key==='date'){
+  it.dateBasis='manual';if(it.date)it.dateReview=true;
+ }
+ if(key==='parentId'&&it.type==='reply'&&value){
+  const parent=getPostById(value);
+  if(['missing','visible-date','parent-plus-5'].includes(it.dateBasis)){
+   const suggested=xAddFiveMinutesToStoredPost(parent);
+   if(suggested&&(!it.date||it.dateBasis==='parent-plus-5'||it.date.slice(0,10)===suggested.slice(0,10))){
+    it.date=suggested;it.dateBasis='parent-plus-5';it.dateReview=true;
+    it.reason='선택한 기존 원글의 작성 시각 +5분으로 자동 입력한 임시 시각입니다. 실제 답글 작성 시간을 확인하세요.';
+   }
+  }
+ }
+ if(key==='content'||key==='date'||key==='handle'||key==='accountId')it.allowDistinct=false;
+}
 async function createAccount(it){const name=it.name.trim(),handle=normHandle(it.handle);if(!name||!handleValid(handle)){message('닉네임과 올바른 @아이디를 먼저 입력하세요.',true);return}const old=getAccountByHandle(handle);if(old){it.accountId=old.id;it.name=old.name;it.handle=old.handle;renderItems();message('기존 계정을 연결했습니다.');return}
  if(!confirm(`새 계정을 등록할까요?\n\n닉네임: ${name}\n아이디: @${handle}\n\n캡처 원본과 비교한 후 확인을 누르세요.`))return;
  try{await api('accounts',{name,handle,bio:''});state.db=await api('admin-data');const a=getAccountByHandle(handle);it.accountId=a?.id||'';renderItems();message(`@${handle} 계정을 등록했습니다.`)}catch(e){message('계정 등록 실패: '+e.message,true)}}
 function reviewError(it){if(it.decision!=='pending')return '보류·제외 항목은 검토 대기로 되돌려야 등록할 수 있습니다.';const acct=getAccountById(it.accountId)||getAccountByHandle(it.handle);if(!acct)return '작성자를 PIA 계정과 연결하거나 새 계정을 먼저 등록해 주세요.';
  if(!it.content.trim())return '원문 본문이 비어 있습니다.';if(it.content.length>10000)return '본문이 너무 깁니다.';
  if(!it.date||Number.isNaN(Date.parse(localeTime(it.date))))return '원본 날짜를 확인해 주세요. 자동으로 오늘 날짜를 넣지 않습니다.';
+ if(it.dateBasis==='parent-plus-5'&&!it.dateReview)return '원글 +5분은 임시 시각입니다. 날짜수정필요 체크를 유지하세요.';
  if(it.type==='reply'&&!it.parentId)return '답글 대상 원글을 직접 선택해 주세요.';
  if(it.type==='reply'&&!getPostById(it.parentId))return '원글이 DB에 없습니다. 새로고침 후 확인하세요.';
  if(it.type==='quote'&&!it.quotePostId&&(!it.quoteName.trim()||!handleValid(normHandle(it.quoteHandle))||!it.quoteContent.trim()))return '인용 원문의 닉네임·아이디·본문 또는 기존 게시물을 확인해 주세요.';
@@ -349,7 +427,7 @@ async function saveItem(it){if(it.saving||it.decision==='registered')return;
   const hits=duplicateHits(it);
   if(hits.length&&!confirm(`유사하거나 같은 게시물 ${hits.length}건이 있습니다.\n\n원본과 날짜를 대조했고, 서로 다른 게시물인 것을 확인했다면 계속하세요.\n실제 같은 글이면 취소해 주세요.`))return;
   if(!confirm(`다음 게시물을 PIA에 등록할까요?\n\n작성자: @${acct.handle}\n종류: ${{original:'일반 글',reply:'답글',quote:'인용'}[it.type]}\n날짜: ${it.date} (KST)${it.dateReview?' · 날짜수정필요':''}\n본문: ${it.content.slice(0,150)}${it.content.length>150?'…':''}`))return;
-  const payload={account_id:acct.id,content:it.content,posted_at:localeTime(it.date),date_needs_review:!!it.dateReview,parent_id:it.type==='reply'?it.parentId:null,quote_post_id:it.type==='quote'?(it.quotePostId||null):null,quote_name:it.type==='quote'?it.quoteName.trim():'',quote_handle:it.type==='quote'?normHandle(it.quoteHandle):'',quote_content:it.type==='quote'?it.quoteContent:'',quote_posted_at:it.type==='quote'&&it.quoteDate?localeTime(it.quoteDate):null};
+  const payload={account_id:acct.id,content:it.content,posted_at:localeTime(it.date),date_needs_review:it.dateBasis==='parent-plus-5'||!!it.dateReview,parent_id:it.type==='reply'?it.parentId:null,quote_post_id:it.type==='quote'?(it.quotePostId||null):null,quote_name:it.type==='quote'?it.quoteName.trim():'',quote_handle:it.type==='quote'?normHandle(it.quoteHandle):'',quote_content:it.type==='quote'?it.quoteContent:'',quote_posted_at:it.type==='quote'&&it.quoteDate?localeTime(it.quoteDate):null};
   const out=await api('posts',payload);it.decision='registered';it.resultId=out.id||'';state.db=await api('admin-data');renderAll();message('등록 완료. 원본 캡처는 서버에 업로드되지 않았습니다.');
   if(typeof BroadcastChannel==='function'){const bc=new BroadcastChannel('pia-posts-sync');bc.postMessage('posts-changed');bc.close()}
  }catch(e){message('게시물 저장 실패: '+e.message,true)}finally{it.saving=false;renderItems()}}
@@ -360,7 +438,7 @@ async function loadDraft(file){try{if(state.processing)throw Error('현재 이�
  for(const img of state.images)if(img.url)URL.revokeObjectURL(img.url);
  state.images=body.images.map((v,i)=>({id:'i'+(i+1),name:charLimit(v.name,200)||'원본 파일',hash:String(v.hash||''),status:'manual',raw:charLimit(v.raw,300000),baselineRaw:charLimit(v.baselineRaw,300000),altRaw:charLimit(v.altRaw,300000),regionRaw:v.regionRaw==null?null:charLimit(v.regionRaw,300000),confidence:Number.isFinite(v.confidence)?v.confidence:null,altConfidence:Number.isFinite(v.altConfidence)?v.altConfidence:null,selection:null,selecting:false,url:null,file:null}));
  const ids=new Map(body.images.map((v,i)=>[String(v.id),'i'+(i+1)]));
- state.items=body.items.map((v,i)=>({id:'c'+(i+1),imageId:ids.get(String(v.imageId))||state.images[0]?.id||'',sourceName:charLimit(v.sourceName,200),name:charLimit(v.name,100),handle:charLimit(v.handle,30),accountId:String(v.accountId||''),content:charLimit(v.content,10000),date:charLimit(v.date,19),dateReview:v.dateReview!==false,type:['original','reply','quote'].includes(v.type)?v.type:'original',parentId:String(v.parentId||''),quotePostId:String(v.quotePostId||''),quoteName:charLimit(v.quoteName,100),quoteHandle:charLimit(v.quoteHandle,30),quoteContent:charLimit(v.quoteContent,10000),quoteDate:charLimit(v.quoteDate,19),parentSearch:charLimit(v.parentSearch,120),quoteSearch:charLimit(v.quoteSearch,120),decision:['pending','hold','excluded','registered'].includes(v.decision)?v.decision:'hold',manualSeparate:true,checking:false,saving:false,resultId:String(v.resultId||''),reason:charLimit(v.reason,300),allowDistinct:false}));
+ state.items=body.items.map((v,i)=>({id:'c'+(i+1),imageId:ids.get(String(v.imageId))||state.images[0]?.id||'',sourceName:charLimit(v.sourceName,200),name:charLimit(v.name,100),handle:charLimit(v.handle,30),accountId:String(v.accountId||''),content:charLimit(v.content,10000),date:charLimit(v.date,19),dateBasis:['missing','visible-date','visible-exact','parent-plus-5','manual'].includes(v.dateBasis)?v.dateBasis:(v.date?'manual':'missing'),dateReview:v.dateBasis==='parent-plus-5'||v.dateReview!==false,type:['original','reply','quote'].includes(v.type)?v.type:'original',parentId:String(v.parentId||''),quotePostId:String(v.quotePostId||''),quoteName:charLimit(v.quoteName,100),quoteHandle:charLimit(v.quoteHandle,30),quoteContent:charLimit(v.quoteContent,10000),quoteDate:charLimit(v.quoteDate,19),parentSearch:charLimit(v.parentSearch,120),quoteSearch:charLimit(v.quoteSearch,120),decision:['pending','hold','excluded','registered'].includes(v.decision)?v.decision:'hold',manualSeparate:true,checking:false,saving:false,resultId:String(v.resultId||''),reason:charLimit(v.reason,300),allowDistinct:false}));
  state.seq=Math.max(state.images.length,state.items.length)+1;renderAll();message('검토 초안을 불러왔습니다. 원본 이미지 미리보기는 다시 선택해야 합니다.');
  }catch(e){message('초안 가져오기 실패: '+e.message,true)}}
 // Events
@@ -419,7 +497,7 @@ function finishSelection(e){const drag=state.selectionDrag;if(!drag||drag.pointe
 $('captureImages').addEventListener('pointerup',finishSelection);
 $('captureImages').addEventListener('pointercancel',()=>{state.selectionDrag=null});
 $('captureCandidates').addEventListener('input',e=>{const card=e.target.closest('[data-item]'),it=card&&findItem(card.dataset.item),key=e.target.dataset.key;if(!it||!key)return;updateItemField(it,key,e.target.type==='checkbox'?e.target.checked:e.target.value)})
-$('captureCandidates').addEventListener('change',e=>{const card=e.target.closest('[data-item]'),it=card&&findItem(card.dataset.item),key=e.target.dataset.key;if(!it||!key)return;updateItemField(it,key,e.target.type==='checkbox'?e.target.checked:e.target.value);if(key==='date'&&it.date){it.reason='수동으로 날짜를 수정했습니다. 원본 확인 전까지 날짜수정필요를 유지하세요.'}renderItems()})
+$('captureCandidates').addEventListener('change',e=>{const card=e.target.closest('[data-item]'),it=card&&findItem(card.dataset.item),key=e.target.dataset.key;if(!it||!key)return;updateItemField(it,key,e.target.type==='checkbox'?e.target.checked:e.target.value);if(key==='date'&&it.date){it.reason='날짜를 직접 수정했습니다. 원본 확인 전까지 날짜수정필요를 유지하세요.'}renderItems()})
 $('captureCandidates').addEventListener('click',e=>{const button=e.target.closest('[data-action]');if(!button)return;const card=button.closest('[data-item]'),it=card&&findItem(card.dataset.item);if(!it)return;const act=button.dataset.action;
  if(act==='suggest-author'){const h=button.dataset.handle;if(!handleValid(h))return;if(!confirm(`이 게시물의 작성자가 @${h}가 맞나요? 원본 캡처의 작성자 영역을 확인한 경우에만 선택해 주세요.`))return;updateItemField(it,'handle',h);const acct=getAccountByHandle(h);if(acct)it.name=acct.name;renderItems();return}
  if(act==='create-account'){createAccount(it);return}if(act==='save'){saveItem(it);return}
@@ -427,6 +505,6 @@ $('captureCandidates').addEventListener('click',e=>{const button=e.target.closes
  if(['hold','pending','exclude'].includes(act)){it.decision=act==='exclude'?'excluded':act;renderItems();message(act==='exclude'?'이 후보는 등록하지 않습니다. 원본 이미지는 보존됩니다.':act==='hold'?'검토 보류로 변경했습니다.':'검토 대기로 되돌렸습니다.')}});
 window.addEventListener('beforeunload',e=>{if(state.items.some(i=>i.decision==='pending'||i.decision==='hold')){e.preventDefault();e.returnValue=''}});
 // Pure functions exposed for local regression tests; no server action.
-window.PIA_CAPTURE_TEST={dateFromText,parseCandidates,normBody,normHandle,similarBody,ocrDiffSummary,normalizeCropRect,rankOcrText,canvasForSource};
+window.PIA_CAPTURE_TEST={dateFromText,parseCandidates,xAddFiveMinutesKst,xAddFiveMinutesToStoredPost,updateItemField,normBody,normHandle,similarBody,ocrDiffSummary,normalizeCropRect,rankOcrText,canvasForSource};
 auth();
 })();
