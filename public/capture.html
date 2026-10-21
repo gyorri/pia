@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PIA · 캡처 자동 등록</title>
+<link rel="stylesheet" href="/admin.css?v=28">
+<link rel="stylesheet" href="/capture.css?v=28">
+</head>
+<body>
+<header class="topbar"><div><strong>PIA</strong><span>무료 캡처 인식 · 검수 · 등록</span></div><a href="/admin.html">← 관리자 돌아가기</a></header>
+<main class="capture-main">
+<section id="captureGate" class="card" hidden><h1>관리자 로그인 필요</h1><p>캡처 등록은 관리자만 사용할 수 있습니다. 관리자 페이지에서 로그인한 뒤 다시 열어 주세요.</p><a class="capture-link" href="/admin.html">관리자 로그인 페이지로 이동</a></section>
+<div id="captureWorkspace" hidden>
+<div class="intro"><div><h1>캡처 자동 등록</h1><p>X 캡처에서 글자를 무료로 읽고, <strong>사람이 확인한 게시물만</strong> 등록합니다.</p></div><span class="capture-cost">추가 결제 0원</span></div>
+<div class="capture-notice" role="note"><strong>이미지는 서버에 업로드하지 않습니다.</strong> OCR은 이 브라우저에서 실행됩니다. 처음 인식할 때 무료 OCR 프로그램과 한글 모델을 인터넷에서 내려받습니다. 작은 글씨·답글 구조는 틀릴 수 있으므로 원본과 꼭 비교하세요. 원본 이미지와 OCR 결과는 최종 등록 전까지 PIA DB에 저장되지 않습니다.</div>
+<section class="card capture-upload" aria-labelledby="captureUploadTitle">
+<div class="section-head"><div><h2 id="captureUploadTitle">1. 이미지 넣기</h2><p>PNG·JPG·WEBP 파일을 여러 개 선택하거나, 이미지를 복사한 다음 여기에 붙여넣으세요. 선택 후 순서대로 인식합니다.</p></div><span class="counter" id="captureCount">0장</span></div>
+<label id="captureDrop" class="capture-drop" for="captureFiles" tabindex="0"><span class="capture-drop-symbol" aria-hidden="true">▧</span><strong>이미지 선택 또는 여기에 끌어놓기</strong><span>Ctrl+V로 이미지 붙여넣기도 가능 · 한 번에 최대 20장 권장</span><input id="captureFiles" type="file" accept="image/png,image/jpeg,image/webp" multiple></label>
+<div class="capture-controls"><button id="captureCancel" class="secondary" type="button" disabled>대기 중지</button><button id="captureSaveDraft" class="secondary" type="button">검토 초안 JSON 저장</button><label class="capture-import-draft">초안 JSON 불러오기<input id="captureDraftFile" type="file" accept="application/json,.json" hidden></label><button id="captureClear" class="ghost" type="button">대기열 초기화</button></div>
+<div id="captureProgress" class="capture-progress" role="status" aria-live="polite">이미지를 선택하면 자동 인식이 시작됩니다.</div>
+</section>
+<section class="card" aria-labelledby="captureImagesTitle"><div class="section-head"><div><h2 id="captureImagesTitle">2. 원본 이미지 · OCR 결과</h2><p>그림 아래 인식 텍스트를 직접 고치거나, 게시물 단위로 다시 분리할 수 있습니다.</p></div></div><div id="captureImages" class="capture-image-list"><div class="empty">아직 추가한 이미지가 없습니다.</div></div></section>
+<section class="card" aria-labelledby="captureCandidatesTitle"><div class="section-head"><div><h2 id="captureCandidatesTitle">3. 게시물 확인 · 중복 검사 · 등록</h2><p>본문과 작성 계정·시간을 확인하고 중복을 검사한 뒤 등록하세요. 답글·인용 관계는 자동 확정하지 않습니다.</p></div><span class="counter" id="captureCandidateCount">0건</span></div>
+<div class="capture-filter"><label>검토 상태<select id="captureFilter"><option value="all">전체</option><option value="pending">검토 대기</option><option value="hold">보류</option><option value="registered">등록 완료</option><option value="excluded">제외</option></select></label><button type="button" id="captureRefreshDb" class="secondary">DB 중복 목록 새로고침</button></div>
+<div id="captureCandidates" class="capture-candidates"><div class="empty">이미지를 인식하면 게시물 검토 카드가 나타납니다.</div></div></section>
+<div id="captureToast" class="capture-toast" role="status" aria-live="polite" hidden></div>
+</div>
+</main>
+<script src="/capture.js?v=28" defer></script>
+</body></html>
