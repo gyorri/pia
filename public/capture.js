@@ -1,12 +1,12 @@
-/* PIA v0.3.28 – 100% free browser-side OCR; no third-party image API, no server-side image uploads.
+/* PIA v0.3.29 – 100% free browser-side OCR; no third-party image API, no server-side image uploads.
    OCR program, WASM, and kor/eng traineddata are downloaded by Tesseract.js from public CDNs.
    Only reviewed, user-approved text is submitted to the existing PIA API. */
 (()=>{'use strict';
 const $=id=>document.getElementById(id);
 const escapeHtml=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const safeAttr=escapeHtml;
-const state={images:[],items:[],db:{accounts:[],posts:[]},seq:0,processing:false,cancel:false,worker:null,workerLoading:null,opened:false};
-const MAX_FILES=20,MAX_BYTES=18*1024*1024;
+const state={images:[],items:[],db:{accounts:[],posts:[]},seq:0,processing:false,cancel:false,worker:null,workerLoading:null,opened:false,regionRunning:false,ingestChain:Promise.resolve(),selectionDrag:null};
+const MAX_FILES=20,MAX_BYTES=18*1024*1024,MAX_TOTAL=60,MAX_CANVAS_PIXELS=9000000;
 const OCR_SCRIPT='https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
 const norm=s=>String(s??'').normalize('NFKC').trim().replace(/\s+/gu,' ');
 const normHandle=s=>String(s??'').trim().replace(/^@/,'').toLowerCase();
@@ -84,8 +84,27 @@ function duplicateHits(item){const handle=normHandle(getAccountById(item.account
  const matched=[];for(const post of state.db.posts){const acct=getAccountById(post.account_id);if(normHandle(acct?.handle)!==handle)continue;const exact=sameBody(body,post.content);let score=exact?1:0;if(!exact&&body.length>=15&&String(post.content||'').length>=15)score=similarBody(body,post.content);if(score>=.84)matched.push({exact,score,post,other:null})}
  for(const other of state.items){if(other.id===item.id||other.decision==='excluded'||other.decision==='registered'||normHandle(getAccountById(other.accountId)?.handle||other.handle)!==handle)continue;const score=sameBody(body,other.content)?1:similarBody(body,other.content);if(score>=.84)matched.push({exact:score===1,score,post:null,other})}
  return matched.sort((a,b)=>b.score-a.score).slice(0,6)}
+function ocrDiffSummary(a,b){
+ const left=String(a||'').split('\n'),right=String(b||'').split('\n');
+ const count=Math.max(left.length,right.length);let diff=0;const examples=[];
+ for(let i=0;i<count;i++){
+  if((left[i]||'').trim()!==(right[i]||'').trim()){
+   diff++;
+   if(examples.length<5)examples.push({index:i+1,before:(left[i]||'').slice(0,180),after:(right[i]||'').slice(0,180)});
+  }
+ }
+ return {diff,examples};
+}
 function renderImages(){const node=$('captureImages');$('captureCount').textContent=state.images.length+'장';if(!state.images.length){node.innerHTML='<div class="empty">아직 추가한 이미지가 없습니다.</div>';return}
- node.innerHTML=state.images.map(img=>`<article class="capture-image-card" data-img="${safeAttr(img.id)}"><div class="capture-card-head"><strong>${escapeHtml(img.name)}</strong><div class="capture-card-tools"><button type="button" data-image-action="scan" data-id="${safeAttr(img.id)}" ${img.status==='scanning'?'disabled':''}>다시 인식</button><button type="button" data-image-action="remove" data-id="${safeAttr(img.id)}">제거</button></div></div><div class="capture-photo-row"><div>${img.url?`<a href="${safeAttr(img.url)}" target="_blank" rel="noopener noreferrer" title="원본 크기로 이미지 보기"><img class="capture-photo-preview" src="${safeAttr(img.url)}" alt="원본 ${safeAttr(img.name)}"></a><small>이미지를 누르면 원본 크기로 볼 수 있습니다.</small>`:'<div class="capture-no-preview">JSON에서 불러온 기록입니다. 이미지 미리보기는 없습니다.</div>'}</div><div><div class="capture-ocr-meta">${escapeHtml(img.status==='scanning'?'인식 중…':img.status==='done'?'인식 완료':img.status==='error'?'OCR 실패 · 수동 입력 가능':img.status==='queued'?'인식 대기':'텍스트 검토')} ${img.confidence==null?'':`· 글자 인식 신뢰도 참고값 ${Math.round(img.confidence)}%`}</div><label>인식한 글자 전체<textarea class="capture-ocr-text" data-image-text="${safeAttr(img.id)}" spellcheck="false" placeholder="OCR 결과를 수정해 주세요.">${escapeHtml(img.raw||'')}</textarea></label><div class="capture-photo-tools"><button type="button" data-image-action="parse" data-id="${safeAttr(img.id)}">이 텍스트로 게시물 다시 나누기</button><button type="button" data-image-action="add" data-id="${safeAttr(img.id)}">게시물 직접 추가</button></div><small>게시물 ${state.items.filter(i=>i.imageId===img.id).length}건 · 재분리하면 기존 미등록 후보를 교체합니다. 이미 등록된 게시물은 DB에서 삭제되지 않습니다.</small></div></div></article>`).join('')}
+ node.innerHTML=state.images.map(img=>{
+  const hasAlt=typeof img.altRaw==='string'&&img.altRaw.length>0;
+  const diff=hasAlt?ocrDiffSummary(img.baselineRaw||'',img.altRaw):null;
+  const highlighted=diff?diff.examples.map(x=>`<div class="capture-ocr-change"><b>${x.index}번째 줄</b><div>기본: ${escapeHtml(x.before||'(없음)')}</div><div>보정: ${escapeHtml(x.after||'(없음)')}</div></div>`).join(''):'';
+  return `<article class="capture-image-card" data-img="${safeAttr(img.id)}"><div class="capture-card-head"><strong>${escapeHtml(img.name)}</strong><div class="capture-card-tools"><button type="button" data-image-action="scan" data-id="${safeAttr(img.id)}" ${img.status==='scanning'?'disabled':''}>다시 인식</button><button type="button" data-image-action="remove" data-id="${safeAttr(img.id)}">제거</button></div></div><div class="capture-photo-row"><div>${img.url?`<div class="capture-preview-scroller"><div class="capture-crop-surface" data-crop-image="${safeAttr(img.id)}" data-selecting="${img.selecting?'true':'false'}"><img class="capture-photo-preview" src="${safeAttr(img.url)}" alt="원본 ${safeAttr(img.name)}" draggable="false"><div class="capture-select-box" ${img.selection?`style="left:${img.selection.x*100}%;top:${img.selection.y*100}%;width:${img.selection.w*100}%;height:${img.selection.h*100}%;"`:'hidden'}></div></div></div><div class="capture-photo-tools"><a href="${safeAttr(img.url)}" target="_blank" rel="noopener noreferrer">원본 크기로 보기 ↗</a><button type="button" data-image-action="select" data-id="${safeAttr(img.id)}" ${img.file?'':'disabled'}>${img.selecting?'드래그 선택 취소':'작은 영역 직접 선택'}</button><button type="button" data-image-action="region" data-id="${safeAttr(img.id)}" ${img.selection&&img.file?'':'disabled'}>선택 영역 정밀 재인식</button></div><small>"작은 영역 직접 선택"을 누르고 이미지에서 마우스로 범위를 드래그하세요. 결과는 원문에 자동 합치지 않습니다.</small>${img.regionRaw!=null?`<label class="capture-region-result">선택 영역 재인식 결과<textarea readonly class="capture-region-text" data-region-result="${safeAttr(img.id)}">${escapeHtml(img.regionRaw)}</textarea></label><div class="capture-photo-tools"><button type="button" data-image-action="copy-region" data-id="${safeAttr(img.id)}">영역 텍스트 복사</button><button type="button" data-image-action="append-region" data-id="${safeAttr(img.id)}">전체 OCR에 추가 (확인 후)</button></div>`:''}`:'<div class="capture-no-preview">JSON에서 불러온 기록입니다. 이미지 미리보기는 없습니다.</div>'}</div><div><div class="capture-ocr-meta">${escapeHtml(img.status==='scanning'?'인식 중…':img.status==='done'?'인식 완료':img.status==='error'?'OCR 실패 · 수동 입력 가능':img.status==='queued'?'인식 대기':img.status==='paused'?'대기 중지':'텍스트 검토')} ${img.confidence==null?'':`· 기본 인식 신뢰도 ${Math.round(img.confidence)}% (참고)`} ${hasAlt&&img.altConfidence!=null?`· 보정 인식 ${Math.round(img.altConfidence)}% (참고)`:''}</div>
+  ${hasAlt?`<div class="capture-variant"><strong>원본 OCR ↔ 확대·대비 보정 OCR</strong><span>서로 다른 줄 약 ${diff.diff}개 · 높은 신뢰도가 항상 정답은 아닙니다.</span><div class="capture-compare-grid"><label>기본 결과<textarea readonly spellcheck="false">${escapeHtml(img.baselineRaw||'')}</textarea></label><label>보정 결과<textarea readonly spellcheck="false">${escapeHtml(img.altRaw)}</textarea></label></div><div class="capture-compare-changes">${highlighted||'<span>줄별 비교에서 차이가 없습니다.</span>'}${diff.diff>diff.examples.length?`<small>그 외 차이 ${diff.diff-diff.examples.length}개 · 전체 결과는 위에서 비교하세요.</small>`:''}</div><div class="capture-photo-tools"><button type="button" data-image-action="use-basic" data-id="${safeAttr(img.id)}">기본 결과 적용</button><button type="button" data-image-action="use-enhanced" data-id="${safeAttr(img.id)}">보정 결과 적용</button></div></div>`:''}
+  <label>현재 검토 중인 OCR 원문<textarea class="capture-ocr-text" data-image-text="${safeAttr(img.id)}" spellcheck="false" placeholder="OCR 결과를 수정해 주세요.">${escapeHtml(img.raw||'')}</textarea></label><div class="capture-photo-tools"><button type="button" data-image-action="parse" data-id="${safeAttr(img.id)}">이 텍스트로 게시물 다시 나누기</button><button type="button" data-image-action="add" data-id="${safeAttr(img.id)}">게시물 직접 추가</button></div><small>게시물 ${state.items.filter(i=>i.imageId===img.id).length}건 · 재분리하면 미등록 후보의 수정 내용이 교체됩니다. 등록 완료된 글은 DB에서 삭제되지 않습니다.</small></div></div></article>`;
+ }).join('');
+}
 function optionPost(p){const a=getAccountById(p.account_id);return `<option value="${safeAttr(p.id)}">@${escapeHtml(a?.handle||'unknown')} · ${escapeHtml(String(p.content||'').slice(0,85).replace(/\n/g,' '))}</option>`}
 function duplicateHtml(item){const hits=duplicateHits(item);let intro='';if(!normHandle(item.handle)&&!item.accountId)intro='<div class="capture-warn">작성자 확인 후 중복 비교가 가능합니다.</div>';else if(!item.content.trim())intro='<div class="capture-warn">본문을 입력하면 중복 비교가 가능합니다.</div>';else if(!hits.length)intro='<div class="capture-none">현재 불러온 DB와 대기열에서 일치하는 글이 없습니다. 등록 직전에 다시 검사합니다.</div>';
  return intro+hits.map(hit=>{const p=hit.post,a=p?getAccountById(p.account_id):null;const label=hit.exact?'본문이 동일함':'유사 게시물';const when=p?.posted_at||hit.other?.date||'';const url=p?`<a target="_blank" rel="noopener" href="/#/post/${encodeURIComponent(p.id)}">기존 글 보기 ↗</a>`:'이번 대기열의 다른 후보';return `<div class="capture-duplicate"><strong>${escapeHtml(label)} · 유사도 ${Math.round(hit.score*100)}%</strong>${escapeHtml(a?.name||hit.other?.name||'')} ${escapeHtml(when)}<p>${escapeHtml(String(p?.content||hit.other?.content||'').slice(0,160))}</p>${url}</div>`}).join('')}
@@ -121,8 +140,49 @@ function renderItems(){const filter=$('captureFilter').value,display=state.items
 function renderAll(){renderImages();renderItems()}
 function findItem(id){return state.items.find(it=>it.id===id)}
 function setImageText(img,value){img.raw=value}
-function reparse(img,{confirmReplace=true}={}){if(confirmReplace&&state.items.some(it=>it.imageId===img.id)){if(!confirm('이 이미지의 미등록 후보는 새 OCR 내용으로 교체됩니다. 직접 수정한 내용은 사라집니다. 등록 완료된 글은 DB에 유지됩니다. 계속할까요?'))return}
+function reparse(img,{confirmReplace=true}={}){if(state.items.some(it=>it.imageId===img.id&&it.decision==='registered')){message('이미 등록한 글이 있는 이미지입니다. 중복 후보를 생성하지 않도록 재분리를 막았습니다. 다른 게시물이 있다면 「게시물 직접 추가」를 이용하세요.',true);return}if(confirmReplace&&state.items.some(it=>it.imageId===img.id)){if(!confirm('이 이미지의 미등록 후보는 새 OCR 내용으로 교체됩니다. 직접 수정한 내용은 사라집니다. 등록 완료된 글은 DB에 유지됩니다. 계속할까요?'))return}
  const extracted=parseCandidates(img.raw);state.items=state.items.filter(it=>it.imageId!==img.id||it.decision==='registered');state.items.push(...extracted.map(t=>newItem(img,t)));renderAll();message(`${img.name}: ${extracted.length}개 후보를 만들었습니다. 원본과 확인해 주세요.`)}
+function normalizeCropRect(rect){if(!rect)return null;const x=Math.max(0,Math.min(1,Number(rect.x))),y=Math.max(0,Math.min(1,Number(rect.y)));
+ const w=Math.max(0,Math.min(1-x,Number(rect.w))),h=Math.max(0,Math.min(1-y,Number(rect.h)));
+ return [x,y,w,h].every(Number.isFinite)&&w>.012&&h>.012?{x,y,w,h}:null}
+function canvasForSource(bitmap,selection=null,{enhance=false}={}){
+ const crop=normalizeCropRect(selection)||{x:0,y:0,w:1,h:1};
+ const sx=Math.round(bitmap.width*crop.x),sy=Math.round(bitmap.height*crop.y);
+ const sw=Math.max(1,Math.min(bitmap.width-sx,Math.round(bitmap.width*crop.w))),sh=Math.max(1,Math.min(bitmap.height-sy,Math.round(bitmap.height*crop.h)));
+ let scale=enhance?Math.min(3,Math.max(1.4,1700/sw)):Math.min(2.5,Math.max(1,900/sw));
+ scale=Math.min(scale,Math.sqrt(MAX_CANVAS_PIXELS/(sw*sh)));
+ if(!Number.isFinite(scale)||scale<=0)throw Error('이미지 크기가 너무 큽니다. 작은 영역만 선택해 주세요.');
+ const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(sw*scale));canvas.height=Math.max(1,Math.round(sh*scale));
+ const ctx=canvas.getContext('2d',{willReadFrequently:enhance});if(!ctx)throw Error('이미지 처리 공간을 만들 수 없습니다.');
+ ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';ctx.drawImage(bitmap,sx,sy,sw,sh,0,0,canvas.width,canvas.height);
+ if(enhance){const data=ctx.getImageData(0,0,canvas.width,canvas.height),px=data.data;
+  let sum=0,n=0;for(let i=0;i<px.length;i+=Math.max(4,Math.floor(px.length/12000/4)*4)){sum+=.299*px[i]+.587*px[i+1]+.114*px[i+2];n++}
+  const invert=n>0&&sum/n<112;
+  for(let i=0;i<px.length;i+=4){let v=.299*px[i]+.587*px[i+1]+.114*px[i+2];if(invert)v=255-v;v=Math.max(0,Math.min(255,Math.round((v-127)*1.34+127)));px[i]=px[i+1]=px[i+2]=v;px[i+3]=255}
+  ctx.putImageData(data,0,0);
+ }
+ return canvas;
+}
+async function loadBitmap(file){if(typeof createImageBitmap==='function')return createImageBitmap(file);const blob=URL.createObjectURL(file);try{return await new Promise((resolve,reject)=>{const im=new Image();im.onload=()=>resolve(im);im.onerror=()=>reject(Error('이미지를 열 수 없습니다.'));im.src=blob})}finally{URL.revokeObjectURL(blob)}}
+function rankOcrText(value,confidence){const raw=String(value||'');const length=raw.replace(/\s/g,'').length;const handleHits=(raw.match(/@[a-zA-Z0-9_]{2,30}/g)||[]).length;
+ const replacements=(raw.match(/[�□■]/g)||[]).length;const dateHits=dateFromText(raw).value?1:0;
+ return Math.min(length,4000)*.008+handleHits*2.5+dateHits*3+(Number.isFinite(confidence)?confidence*.15:0)-replacements*3;
+}
+async function performOCR(worker,input,mode='3'){
+ try{await worker.setParameters({tessedit_pageseg_mode:String(mode)})}catch(e){console.warn('OCR 페이지 분리 모드를 설정하지 못해 기본 설정으로 실행합니다.',e)}
+ return worker.recognize(input)
+}
+function setSelection(img,rect){img.selection=normalizeCropRect(rect);renderImages()}
+async function scanRegion(img){if(state.processing||state.regionRunning){message('이미지 대기열 인식이 끝난 뒤 영역 재인식을 실행하세요.',true);return}if(!img.file||!img.selection){message('이미지에서 읽을 영역을 먼저 드래그하세요.',true);return}
+ state.regionRunning=true;try{const bitmap=await loadBitmap(img.file);let canvas;try{canvas=canvasForSource(bitmap,img.selection,{enhance:true})}finally{bitmap.close?.()}
+  const worker=await ensureWorker();progress(`${img.name}: 선택 영역을 재인식하는 중…`);
+  const result=await performOCR(worker,canvas,6);img.regionRaw=String(result?.data?.text||'').trim();
+  renderImages();message(img.regionRaw?'영역 인식 완료. 원본과 비교한 뒤 복사하거나 수동으로 적용해 주세요.':'선택 영역에서 문자를 찾지 못했습니다. 범위를 넓혀 다시 선택해 보세요.');
+ }catch(e){message('영역 재인식 실패: '+e.message,true)}finally{state.regionRunning=false;if(state.images.some(x=>x.status==='queued'))processQueue()}}
+async function useVariant(img,kind){const value=kind==='enhanced'?img.altRaw:img.baselineRaw;if(typeof value!=='string')return;
+ if(img.raw!==value&&!confirm('현재 편집한 OCR 원문을 다른 인식 결과로 바꿀까요? 직접 수정한 글자가 덮어써질 수 있습니다.'))return;
+ if(state.items.some(it=>it.imageId===img.id&&it.decision!=='registered')&&!confirm('선택한 결과로 게시물을 다시 나누면 미등록 후보의 편집 내용이 교체됩니다. 계속할까요?'))return;
+ img.raw=value;reparse(img,{confirmReplace:false});message(kind==='enhanced'?'보정 OCR 결과를 적용했습니다. 원본 캡처와 다시 대조하세요.':'기본 OCR 결과를 적용했습니다. 원본 캡처와 다시 대조하세요.')}
 async function ensureWorker(){if(state.worker)return state.worker;if(state.workerLoading)return state.workerLoading;
  state.workerLoading=(async()=>{
   if(!window.Tesseract){await new Promise((resolve,reject)=>{const s=document.createElement('script');s.src=OCR_SCRIPT;s.crossOrigin='anonymous';s.onload=resolve;s.onerror=()=>reject(Error('무료 OCR 프로그램을 내려받지 못했습니다. 네트워크 또는 CDN 차단을 확인하세요.'));document.head.appendChild(s)})}
@@ -131,15 +191,42 @@ async function ensureWorker(){if(state.worker)return state.worker;if(state.worke
   state.worker=await Tesseract.createWorker(['kor','eng'],1,{logger:m=>{if(m.status&&state.processing)progress(`브라우저 OCR: ${m.status} ${m.progress?Math.round(m.progress*100)+'%':''}`)}});
   return state.worker;
  })().finally(()=>{state.workerLoading=null});return state.workerLoading}
-async function scanImage(img){if(!img.file||state.cancel)return;img.status='scanning';renderImages();try{const worker=await ensureWorker();if(state.cancel)return;progress(`${img.name}: 이미지의 글자를 읽는 중…`);const result=await worker.recognize(img.file);img.raw=String(result?.data?.text||'');img.confidence=Number.isFinite(result?.data?.confidence)?result.data.confidence:null;img.status='done';reparse(img,{confirmReplace:false})}catch(e){img.status='error';progress(`인식 실패: ${e.message}. 아래 원문 입력칸에 직접 적을 수도 있습니다.`);message(`인식 오류: ${e.message}`,true)}finally{renderImages()}}
-async function processQueue(){if(state.processing)return;state.processing=true;state.cancel=false;$('captureCancel').disabled=false;try{while(!state.cancel){const queued=state.images.find(img=>img.status==='queued'&&img.file);if(!queued)break;await scanImage(queued)}}finally{state.processing=false;$('captureCancel').disabled=true;if(state.cancel){for(const img of state.images)if(img.status==='queued')img.status='paused';progress('대기열을 중지했습니다. 이미 인식한 글자는 보존됩니다.')}else progress(`인식 대기열 완료 · 이미지 ${state.images.length}장 · 검토 후보 ${state.items.length}건`);renderAll()}}
+async function scanImage(img){if(!img.file||state.cancel)return;img.status='scanning';renderImages();try{
+ const worker=await ensureWorker();if(state.cancel){img.status='paused';return;}
+ progress(`${img.name}: 기본 OCR을 진행하는 중…`);
+ const base=await performOCR(worker,img.file,3);
+ const baseline=String(base?.data?.text||''),baseConf=Number.isFinite(base?.data?.confidence)?base.data.confidence:null;
+ img.baselineRaw=baseline;img.raw=baseline;img.confidence=baseConf;img.altRaw='';img.altConfidence=null;
+ if(($('captureMode')?.value||'precise')==='precise'&&!state.cancel){
+  try{progress(`${img.name}: 확대·대비 보정본을 추가로 인식하는 중…`);
+   const bitmap=await loadBitmap(img.file);let canvas;try{canvas=canvasForSource(bitmap,null,{enhance:true})}finally{bitmap.close?.()}
+   const revised=await performOCR(worker,canvas,6);
+   img.altRaw=String(revised?.data?.text||'');img.altConfidence=Number.isFinite(revised?.data?.confidence)?revised.data.confidence:null;
+   // Accuracy cannot be determined from OCR confidence alone: preserve the original and ask the user to compare.
+   img.bestSuggestion=rankOcrText(img.altRaw,img.altConfidence)>rankOcrText(baseline,baseConf)?'enhanced':'basic';
+   if(!baseline.trim()&&img.altRaw.trim())img.raw=img.altRaw; // empty baseline: show usable alternative for review
+  }catch(e){img.altRaw='';img.altConfidence=null;message(`${img.name}: 보정 인식을 실행하지 못했지만 기본 인식 결과는 유지됩니다. ${e.message}`,true)}
+ }
+ img.status='done';reparse(img,{confirmReplace:false});
+ }catch(e){img.status='error';progress(`인식 실패: ${e.message}. 아래 원문 입력칸에 직접 적을 수도 있습니다.`);message(`인식 오류: ${e.message}`,true)}finally{renderImages()}}
+async function processQueue(){if(state.processing||state.regionRunning)return;state.processing=true;state.cancel=false;$('captureCancel').disabled=false;try{while(!state.cancel){const queued=state.images.find(img=>img.status==='queued'&&img.file);if(!queued)break;await scanImage(queued)}}finally{state.processing=false;$('captureCancel').disabled=true;if(state.cancel){for(const img of state.images)if(img.status==='queued')img.status='paused';progress('대기열을 중지했습니다. 이미 인식한 글자는 보존됩니다.')}else progress(`인식 대기열 완료 · 이미지 ${state.images.length}장 · 검토 후보 ${state.items.length}건`);renderAll()}}
 async function fileHash(file){if(!window.crypto?.subtle)return `${file.name}:${file.size}:${file.lastModified}`;const buffer=await file.arrayBuffer();const bytes=new Uint8Array(await crypto.subtle.digest('SHA-256',buffer));return Array.from(bytes,x=>x.toString(16).padStart(2,'0')).join('')}
-async function addFiles(files){let accepted=0;const incoming=Array.from(files||[]);if(incoming.length>MAX_FILES)message(`한 번에 ${MAX_FILES}장까지 처리합니다. 나머지는 다시 선택해 주세요.`,true);for(const file of incoming.slice(0,MAX_FILES)){
- if(!['image/png','image/jpeg','image/webp'].includes(file.type)){message(`지원하지 않는 파일: ${file.name}`,true);continue}
- if(file.size>MAX_BYTES){message(`${file.name}은 18MB가 넘어서 건너뜁니다.`,true);continue}
- const hash=await fileHash(file);if(state.images.some(img=>img.hash===hash)){message(`${file.name}: 동일 이미지가 이미 대기열에 있습니다.`);continue}
- const img={id:'i'+(++state.seq),name:file.name,file,hash,url:URL.createObjectURL(file),status:'queued',raw:'',confidence:null};state.images.push(img);accepted++}
- if(accepted){renderAll();if(!state.processing)processQueue()}}
+async function ingestFiles(incoming,source='file'){let accepted=0;if(incoming.length>MAX_FILES)message(`한 번에 ${MAX_FILES}장까지 처리합니다. 나머지는 다시 선택해 주세요.`,true);
+ for(const file of incoming.slice(0,MAX_FILES)){
+  if(!['image/png','image/jpeg','image/webp'].includes(file.type)){message(`지원하지 않는 파일: ${file.name}`,true);continue}
+  if(file.size>MAX_BYTES){message(`${file.name}은 18MB가 넘어서 건너뜁니다.`,true);continue}
+  if(state.images.length>=MAX_TOTAL){message(`브라우저 메모리 보호를 위해 대기열은 최대 ${MAX_TOTAL}장입니다. 검토 초안을 저장한 뒤 대기열을 비우고 다시 진행하세요.`,true);break}
+  const hash=await fileHash(file);if(state.images.some(img=>img.hash===hash)){message(`${file.name}: 동일 이미지가 이미 대기열에 있습니다.`);continue}
+  const img={id:'i'+(++state.seq),name:file.name,file,hash,url:URL.createObjectURL(file),status:'queued',raw:'',baselineRaw:'',altRaw:'',regionRaw:null,confidence:null,altConfidence:null,selection:null,selecting:false};state.images.push(img);accepted++;
+ }
+ if(accepted){renderAll();message(`${source==='paste'?'클립보드':'이미지'} ${accepted}장 추가됨 · 현재 ${state.images.length}장. 순서대로 인식합니다.`);processQueue()}
+}
+function addFiles(files,source='file'){
+ const incoming=Array.from(files||[]);if(!incoming.length)return state.ingestChain;
+ // Queue image ingestion, including hashing, to prevent races across rapid Ctrl+V events.
+ state.ingestChain=state.ingestChain.catch(()=>{}).then(()=>ingestFiles(incoming,source)).catch(e=>message('이미지 추가 실패: '+e.message,true));
+ return state.ingestChain;
+}
 function updateItemField(it,key,value){if(!it||it.decision==='registered')return;if(key==='dateReview'||key==='allowDistinct')it[key]=!!value;else it[key]=String(value);if(key==='handle'){const acct=getAccountByHandle(value);it.accountId=acct?.id||''}if(key==='accountId'&&value){const acct=getAccountById(value);if(acct){it.handle=acct.handle;it.name=acct.name}}if(key==='date'&&it.date)it.dateReview=true;if(key==='content'||key==='date'||key==='handle'||key==='accountId')it.allowDistinct=false}
 async function createAccount(it){const name=it.name.trim(),handle=normHandle(it.handle);if(!name||!handleValid(handle)){message('닉네임과 올바른 @아이디를 먼저 입력하세요.',true);return}const old=getAccountByHandle(handle);if(old){it.accountId=old.id;it.name=old.name;it.handle=old.handle;renderItems();message('기존 계정을 연결했습니다.');return}
  if(!confirm(`새 계정을 등록할까요?\n\n닉네임: ${name}\n아이디: @${handle}\n\n캡처 원본과 비교한 후 확인을 누르세요.`))return;
@@ -167,25 +254,69 @@ async function saveItem(it){if(it.saving||it.decision==='registered')return;
  }catch(e){message('게시물 저장 실패: '+e.message,true)}finally{it.saving=false;renderItems()}}
 function deleteImg(img){if(!img)return;if(img.status==='scanning'){message('현재 인식 중인 이미지는 완료 후 제거할 수 있습니다.',true);return}if(state.items.some(it=>it.imageId===img.id&&it.decision==='registered')){if(!confirm('등록된 게시물은 DB에 유지됩니다. 이미지와 검토 기록만 제거할까요?'))return}
  if(img.url)URL.revokeObjectURL(img.url);state.images=state.images.filter(i=>i.id!==img.id);state.items=state.items.filter(it=>it.imageId!==img.id);renderAll()}
-function saveDraft(){const draft={format:'pia-capture-draft-v1',created_at:new Date().toISOString(),images:state.images.map(({id,name,hash,status,raw,confidence})=>({id,name,hash,status:'manual',raw,confidence})),items:state.items.map(it=>{const {saving,checking,...rest}=it;return rest})};const url=URL.createObjectURL(new Blob([JSON.stringify(draft,null,2)],{type:'application/json;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='pia-capture-review-draft.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),2000);message('검토 초안 저장 완료. 원본 이미지는 JSON에 포함되지 않습니다.')}
+function saveDraft(){const draft={format:'pia-capture-draft-v1',created_at:new Date().toISOString(),images:state.images.map(({id,name,hash,status,raw,baselineRaw,altRaw,confidence,altConfidence,regionRaw})=>({id,name,hash,status:'manual',raw,baselineRaw,altRaw,confidence,altConfidence,regionRaw})),items:state.items.map(it=>{const {saving,checking,...rest}=it;return rest})};const url=URL.createObjectURL(new Blob([JSON.stringify(draft,null,2)],{type:'application/json;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='pia-capture-review-draft.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),2000);message('검토 초안 저장 완료. 원본 이미지는 JSON에 포함되지 않습니다.')}
 async function loadDraft(file){try{if(state.processing)throw Error('현재 이미지 인식 중입니다. 대기열을 중지하고 다시 시도해 주세요.');const body=JSON.parse(await file.text());if(body.format!=='pia-capture-draft-v1'||!Array.isArray(body.images)||!Array.isArray(body.items))throw Error('PIA 캡처 초안 형식이 아닙니다.');if(body.items.length>3000||body.images.length>3000)throw Error('너무 많은 기록입니다.');if((state.images.length||state.items.length)&&!confirm('현재 미등록 검토 대기열을 모두 교체할까요? DB의 기존 등록 글은 삭제되지 않습니다.'))return;
  for(const img of state.images)if(img.url)URL.revokeObjectURL(img.url);
- state.images=body.images.map((v,i)=>({id:'i'+(i+1),name:charLimit(v.name,200)||'원본 파일',hash:String(v.hash||''),status:'manual',raw:charLimit(v.raw,300000),confidence:null,url:null,file:null}));
+ state.images=body.images.map((v,i)=>({id:'i'+(i+1),name:charLimit(v.name,200)||'원본 파일',hash:String(v.hash||''),status:'manual',raw:charLimit(v.raw,300000),baselineRaw:charLimit(v.baselineRaw,300000),altRaw:charLimit(v.altRaw,300000),regionRaw:v.regionRaw==null?null:charLimit(v.regionRaw,300000),confidence:Number.isFinite(v.confidence)?v.confidence:null,altConfidence:Number.isFinite(v.altConfidence)?v.altConfidence:null,selection:null,selecting:false,url:null,file:null}));
  const ids=new Map(body.images.map((v,i)=>[String(v.id),'i'+(i+1)]));
  state.items=body.items.map((v,i)=>({id:'c'+(i+1),imageId:ids.get(String(v.imageId))||state.images[0]?.id||'',sourceName:charLimit(v.sourceName,200),name:charLimit(v.name,100),handle:charLimit(v.handle,30),accountId:String(v.accountId||''),content:charLimit(v.content,10000),date:charLimit(v.date,19),dateReview:v.dateReview!==false,type:['original','reply','quote'].includes(v.type)?v.type:'original',parentId:String(v.parentId||''),quotePostId:String(v.quotePostId||''),quoteName:charLimit(v.quoteName,100),quoteHandle:charLimit(v.quoteHandle,30),quoteContent:charLimit(v.quoteContent,10000),quoteDate:charLimit(v.quoteDate,19),parentSearch:charLimit(v.parentSearch,120),quoteSearch:charLimit(v.quoteSearch,120),decision:['pending','hold','excluded','registered'].includes(v.decision)?v.decision:'hold',manualSeparate:true,checking:false,saving:false,resultId:String(v.resultId||''),reason:charLimit(v.reason,300),allowDistinct:false}));
  state.seq=Math.max(state.images.length,state.items.length)+1;renderAll();message('검토 초안을 불러왔습니다. 원본 이미지 미리보기는 다시 선택해야 합니다.');
  }catch(e){message('초안 가져오기 실패: '+e.message,true)}}
 // Events
 $('captureFiles').addEventListener('change',e=>{addFiles(e.target.files);e.target.value=''})
+$('capturePasteButton').addEventListener('click',async()=>{
+ try{
+  if(!navigator.clipboard?.read)throw Error('이 브라우저에서는 클립보드 읽기 버튼을 지원하지 않습니다. Ctrl+V를 사용해 주세요.');
+  const items=await navigator.clipboard.read(),files=[];
+  for(const item of items){const kind=item.types.find(t=>['image/png','image/jpeg','image/webp'].includes(t));if(!kind)continue;
+   const blob=await item.getType(kind);files.push(new File([blob],`pasted_${Date.now()}_${files.length}.${kind.split('/')[1]==='jpeg'?'jpg':kind.split('/')[1]}`,{type:kind}))
+  }
+  if(!files.length){message('클립보드에 이미지가 없습니다. 화면을 캡처하거나 이미지를 복사해 주세요.',true);return}
+  await addFiles(files,'paste');
+ }catch(e){message('클립보드 이미지를 읽지 못했습니다. 페이지에서 Ctrl+V로 다시 시도하세요. '+e.message,true)}
+})
 const drop=$('captureDrop');drop.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();$('captureFiles').click()}});for(const kind of ['dragenter','dragover'])drop.addEventListener(kind,e=>{e.preventDefault();drop.classList.add('dragover')});for(const kind of ['dragleave','drop'])drop.addEventListener(kind,e=>{e.preventDefault();drop.classList.remove('dragover')});drop.addEventListener('drop',e=>addFiles(e.dataTransfer.files));
-document.addEventListener('paste',e=>{if(!state.opened)return;const images=Array.from(e.clipboardData?.items||[]).filter(i=>i.type.startsWith('image/')).map((i,index)=>{const f=i.getAsFile();return f?new File([f],`pasted_${Date.now()}_${index}.png`,{type:f.type}):null}).filter(Boolean);if(images.length){e.preventDefault();addFiles(images)}})
+document.addEventListener('paste',e=>{if(!state.opened)return;const images=Array.from(e.clipboardData?.items||[]).filter(i=>i.type.startsWith('image/')).map((i,index)=>{const f=i.getAsFile();return f?new File([f],`pasted_${Date.now()}_${index}.png`,{type:f.type}):null}).filter(Boolean);if(images.length){e.preventDefault();addFiles(images,'paste')}})
 $('captureCancel').addEventListener('click',()=>{state.cancel=true;message('현재 이미지 인식이 끝나면 대기열을 중지합니다.')});
 $('captureSaveDraft').addEventListener('click',saveDraft);
 $('captureDraftFile').addEventListener('change',e=>{const file=e.target.files[0];if(file)loadDraft(file);e.target.value=''})
 $('captureClear').addEventListener('click',()=>{if(state.processing){message('인식 대기열을 먼저 중지해 주세요.',true);return}if(!confirm('대기열과 검토 기록을 초기화할까요? 이미 PIA DB에 등록된 글은 삭제되지 않습니다.'))return;for(const i of state.images)if(i.url)URL.revokeObjectURL(i.url);state.images=[];state.items=[];renderAll()});
 $('captureFilter').addEventListener('change',renderItems);$('captureRefreshDb').addEventListener('click',()=>refreshDb().catch(e=>message(e.message,true)));
 $('captureImages').addEventListener('input',e=>{const id=e.target.dataset.imageText,img=state.images.find(x=>x.id===id);if(img)setImageText(img,e.target.value)});
-$('captureImages').addEventListener('click',e=>{const button=e.target.closest('[data-image-action]');if(!button)return;const img=state.images.find(x=>x.id===button.dataset.id);if(!img)return;switch(button.dataset.imageAction){case 'remove':deleteImg(img);break;case 'parse':reparse(img);break;case 'add':state.items.push(newItem(img,{reason:'직접 분리한 게시물입니다. 원본을 확인해 주세요.'}));renderItems();break;case 'scan':if(!img.file){message('원본 이미지가 없습니다. 이미지를 다시 추가해 주세요.',true);return}if(state.items.some(it=>it.imageId===img.id)&&!confirm('다시 인식하면 이 이미지의 미등록 후보 편집 내용이 사라집니다. 계속할까요?'))return;if(state.processing){message('현재 다른 이미지를 인식하는 중입니다.',true);return}img.status='queued';processQueue();break}})
+$('captureImages').addEventListener('click',async e=>{const button=e.target.closest('[data-image-action]');if(!button)return;const img=state.images.find(x=>x.id===button.dataset.id);if(!img)return;switch(button.dataset.imageAction){
+ case 'remove':deleteImg(img);break;
+ case 'parse':reparse(img);break;
+ case 'add':state.items.push(newItem(img,{reason:'직접 분리한 게시물입니다. 원본을 확인해 주세요.'}));renderItems();break;
+ case 'scan':if(!img.file){message('원본 이미지가 없습니다. 이미지를 다시 추가해 주세요.',true);return}if(state.items.some(it=>it.imageId===img.id&&it.decision!=='registered')&&!confirm('다시 인식하면 이 이미지의 미등록 후보 편집 내용이 사라집니다. 계속할까요?'))return;if(state.processing||state.regionRunning){message('현재 다른 이미지를 인식하는 중입니다.',true);return}img.status='queued';processQueue();break;
+ case 'use-basic':await useVariant(img,'basic');break;
+ case 'use-enhanced':await useVariant(img,'enhanced');break;
+ case 'select':img.selecting=!img.selecting;img.selection=null;renderImages();message(img.selecting?'이미지에서 읽을 부분을 드래그해 사각형으로 선택하세요.':'영역 선택을 취소했습니다.');break;
+ case 'region':await scanRegion(img);break;
+ case 'copy-region':if(img.regionRaw){const ta=$('captureImages').querySelector(`[data-region-result="${img.id}"]`);try{await navigator.clipboard.writeText(ta?.value||img.regionRaw);message('영역 결과를 복사했습니다.')}catch(e){ta?.focus();ta?.select();message('자동 복사가 제한됐습니다. 선택된 텍스트를 Ctrl+C로 복사하세요.',true)}}break;
+ case 'append-region':if(!img.regionRaw)return;if(!confirm('선택 영역의 결과를 전체 OCR 끝에 추가할까요? 이미 읽은 문장이 중복될 수 있으므로 원본과 비교해야 합니다.'))return;img.raw=[img.raw,img.regionRaw].filter(Boolean).join('\n');renderImages();message('원문에 추가했습니다. 게시물에 반영하려면 「이 텍스트로 게시물 다시 나누기」를 누르세요.');break;
+ }});
+// Drag a precise ROI directly on the original image preview; no bytes leave the browser.
+$('captureImages').addEventListener('pointerdown',e=>{
+ const surface=e.target.closest('[data-crop-image]');if(!surface)return;const img=state.images.find(x=>x.id===surface.dataset.cropImage);if(!img?.selecting||!img.file)return;
+ const r=surface.getBoundingClientRect();if(r.width<=0||r.height<=0)return;
+ e.preventDefault();const x=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width)),y=Math.max(0,Math.min(1,(e.clientY-r.top)/r.height));
+ state.selectionDrag={id:img.id,startX:x,startY:y,pointerId:e.pointerId};surface.setPointerCapture?.(e.pointerId);
+ const box=surface.querySelector('.capture-select-box');if(box){box.hidden=false;box.style.cssText=`left:${x*100}%;top:${y*100}%;width:0;height:0;`}
+});
+$('captureImages').addEventListener('pointermove',e=>{
+ const drag=state.selectionDrag;if(!drag||drag.pointerId!==e.pointerId)return;const surface=e.target.closest('[data-crop-image]')||$('captureImages').querySelector(`[data-crop-image="${drag.id}"]`);if(!surface)return;
+ const r=surface.getBoundingClientRect(),x=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width)),y=Math.max(0,Math.min(1,(e.clientY-r.top)/r.height));
+ const box=surface.querySelector('.capture-select-box');if(box){box.hidden=false;box.style.cssText=`left:${Math.min(x,drag.startX)*100}%;top:${Math.min(y,drag.startY)*100}%;width:${Math.abs(x-drag.startX)*100}%;height:${Math.abs(y-drag.startY)*100}%;`}
+});
+function finishSelection(e){const drag=state.selectionDrag;if(!drag||drag.pointerId!==e.pointerId)return;state.selectionDrag=null;
+ const surface=$('captureImages').querySelector(`[data-crop-image="${drag.id}"]`);if(!surface)return;
+ const r=surface.getBoundingClientRect(),x=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width)),y=Math.max(0,Math.min(1,(e.clientY-r.top)/r.height));
+ const rect=normalizeCropRect({x:Math.min(x,drag.startX),y:Math.min(y,drag.startY),w:Math.abs(x-drag.startX),h:Math.abs(y-drag.startY)});
+ const img=state.images.find(i=>i.id===drag.id);if(!img)return;img.selection=rect;img.selecting=false;
+ renderImages();message(rect?'선택한 영역을 정밀 재인식할 수 있습니다.':'영역이 너무 작습니다. 다시 넓게 선택해 주세요.',!rect);
+}
+$('captureImages').addEventListener('pointerup',finishSelection);
+$('captureImages').addEventListener('pointercancel',()=>{state.selectionDrag=null});
 $('captureCandidates').addEventListener('input',e=>{const card=e.target.closest('[data-item]'),it=card&&findItem(card.dataset.item),key=e.target.dataset.key;if(!it||!key)return;updateItemField(it,key,e.target.type==='checkbox'?e.target.checked:e.target.value)})
 $('captureCandidates').addEventListener('change',e=>{const card=e.target.closest('[data-item]'),it=card&&findItem(card.dataset.item),key=e.target.dataset.key;if(!it||!key)return;updateItemField(it,key,e.target.type==='checkbox'?e.target.checked:e.target.value);if(key==='date'&&it.date){it.reason='수동으로 날짜를 수정했습니다. 원본 확인 전까지 날짜수정필요를 유지하세요.'}renderItems()})
 $('captureCandidates').addEventListener('click',e=>{const button=e.target.closest('[data-action]');if(!button)return;const card=button.closest('[data-item]'),it=card&&findItem(card.dataset.item);if(!it)return;const act=button.dataset.action;
@@ -194,6 +325,6 @@ $('captureCandidates').addEventListener('click',e=>{const button=e.target.closes
  if(['hold','pending','exclude'].includes(act)){it.decision=act==='exclude'?'excluded':act;renderItems();message(act==='exclude'?'이 후보는 등록하지 않습니다. 원본 이미지는 보존됩니다.':act==='hold'?'검토 보류로 변경했습니다.':'검토 대기로 되돌렸습니다.')}});
 window.addEventListener('beforeunload',e=>{if(state.items.some(i=>i.decision==='pending'||i.decision==='hold')){e.preventDefault();e.returnValue=''}});
 // Pure functions exposed for local regression tests; no server action.
-window.PIA_CAPTURE_TEST={dateFromText,parseCandidates,normBody,normHandle,similarBody};
+window.PIA_CAPTURE_TEST={dateFromText,parseCandidates,normBody,normHandle,similarBody,ocrDiffSummary,normalizeCropRect,rankOcrText,canvasForSource};
 auth();
 })();
