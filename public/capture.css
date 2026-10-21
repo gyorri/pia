@@ -97,3 +97,21 @@
 /* v0.3.30: optional, manually confirmed author suggestion from the same screenshot */
 .capture-author-suggest{display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding:9px 12px;border:1px solid #b8d8ee;background:#f5faff;border-radius:10px;font-size:12px;line-height:1.45;color:#40546b}
 .capture-author-suggest button{font-size:12px;padding:6px 9px;min-height:32px}
+
+/* v0.3.33 — clear, manual-only existing parent reuse flow */
+.capture-duplicate .capture-reuse-button{display:block;width:100%;padding:9px 7px;margin-top:8px;border:1px solid #1976ad;border-radius:8px;background:#e8f5ff;color:#17547d;font-size:12px;font-weight:800;text-align:center;cursor:pointer}
+.capture-duplicate .capture-reuse-button:hover{background:#d9efff}
+.capture-reuse-options{border:1px solid #a9d1e8;background:#f3faff;border-radius:10px;padding:12px;display:grid;gap:9px}
+.capture-reuse-options>strong{font-size:13px;color:#19527a}
+.capture-reuse-options>small{font-size:12px;color:#516a7d;line-height:1.4}
+.capture-reuse-choice{border:1px solid #d7e7f1;background:#fff;border-radius:8px;padding:10px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;min-width:0}
+.capture-reuse-choice>div{flex:1 1 220px;min-width:0;overflow-wrap:anywhere}
+.capture-reuse-choice b{font-size:12px;color:#24546e}
+.capture-reuse-choice p{font-size:12px;color:#253849;white-space:pre-wrap;overflow-wrap:anywhere;margin:6px 0 0}
+.capture-reuse-choice button{background:#1d9bf0;color:#fff;border:0;border-radius:8px;padding:9px 12px;font-size:12px;font-weight:800;cursor:pointer}
+.capture-reuse-selected{background:#e4f7e9;color:#167447;padding:6px 9px;border-radius:7px;font-size:12px;font-weight:800}
+.capture-state.linked{background:#e7f7ea;color:#147447}
+.capture-linked-info{border:1px solid #b4ddc4;background:#edf9ef;border-radius:8px;padding:11px;line-height:1.5;margin-top:8px;overflow-wrap:anywhere}
+.capture-linked-info>strong{display:block;color:#146342;font-size:13px}
+.capture-linked-info a{color:#155b8a;text-decoration:underline}
+.capture-final-actions>small{align-self:center;font-size:12px;max-width:500px;color:#536471;line-height:1.4}
