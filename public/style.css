@@ -433,3 +433,32 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Ar
  .shell .tweet.tweet-detail .actions.detail-actions{padding-right:4px!important;padding-left:0!important}
  .shell .tweet.tweet-detail .actions.detail-actions>.action .action-count{font-size:11px!important}
 }
+
+
+/* v0.3.25 — tighter X-like mobile detail layout calibration */
+.shell .tweet-detail .detail-time{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:15px;line-height:20px;color:var(--pia-x-muted);padding:2px 0 14px;margin-top:1px}
+.shell .tweet-detail .detail-time-date{font-size:15px;letter-spacing:-.01em}
+.shell .tweet-detail .detail-time-views{display:inline-flex;align-items:center;gap:4px;font-size:15px;color:var(--pia-x-muted)}
+.shell .tweet-detail .detail-time-views strong{font-weight:800;color:var(--pia-x-text)}
+.shell .tweet.tweet-detail .actions.detail-actions{display:grid!important;grid-template-columns:repeat(5,minmax(0,1fr));align-items:center;justify-items:start;gap:0!important;padding:7px 4px 2px 0!important;border-top:1px solid var(--pia-x-line)}
+.shell .tweet.tweet-detail .actions.detail-actions>.action{width:auto!important;min-width:0!important;flex-basis:auto!important;height:38px!important;display:inline-flex!important;align-items:center;gap:2px;justify-content:flex-start;color:var(--pia-x-muted)}
+.shell .tweet.tweet-detail .actions.detail-actions>.action>.action-icon{width:34px!important;height:34px!important;flex:0 0 34px!important}
+.shell .tweet.tweet-detail .actions.detail-actions>.action svg{width:19px!important;height:19px!important;flex:0 0 19px!important;stroke-width:1.8}
+.shell .tweet.tweet-detail .actions.detail-actions>.action .action-count{display:inline-flex!important;align-items:center;line-height:1;font-size:14px!important;margin-left:1px;color:inherit}
+.shell .tweet.tweet-detail .actions.detail-actions>.action.action-share{justify-self:end}
+.shell .tweet.tweet-detail .actions.detail-actions>.action.action-share .action-count{display:none!important}
+.shell .thread-descendant .tweet{padding-top:14px;padding-bottom:10px}
+.shell .thread-descendant .twhead{align-items:center}
+.shell .thread-descendant .content{margin-top:4px;margin-bottom:9px}
+.shell .thread-descendant .tweet .actions{margin-top:2px}
+@media (max-width:600px){
+  .shell .tweet-detail .detail-time{gap:8px;padding-bottom:12px;font-size:14px}
+  .shell .tweet.tweet-detail .actions.detail-actions{padding:6px 3px 1px 0!important}
+  .shell .tweet.tweet-detail .actions.detail-actions>.action{height:36px!important}
+  .shell .tweet.tweet-detail .actions.detail-actions>.action>.action-icon{width:32px!important;height:32px!important;flex-basis:32px!important}
+  .shell .tweet.tweet-detail .actions.detail-actions>.action .action-count{font-size:13px!important}
+}
+@media (max-width:420px){
+  .shell .tweet.tweet-detail .actions.detail-actions>.action>.action-icon{width:30px!important;height:30px!important;flex-basis:30px!important}
+  .shell .tweet.tweet-detail .actions.detail-actions>.action .action-count{font-size:12px!important}
+}
