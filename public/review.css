@@ -14,3 +14,13 @@
 @media(max-width:650px){.quick-panel{padding:12px;gap:10px}.quick-actions{width:100%}.quick-actions button{flex:1 1 auto;padding:9px 6px;font-size:12px}.db-status{font-size:12px}.bulk-row .bulk-buttons{gap:5px}.bulk-row .bulk-buttons button{font-size:11px;padding:7px 8px}}
 
 .post-detail{border-top:1px solid #e4ebf2;margin-top:10px;padding-top:6px}.post-detail>summary{cursor:pointer;list-style:auto;color:#4c6071;font-size:12px;font-weight:700;padding:8px 2px;user-select:none}.post-detail[open]>summary{color:#2161a2}.post-detail .evidence{margin-top:5px}.post-detail .memo-label{margin-bottom:2px}
+
+/* v0.3.37: single-purpose exclusion workflow, readable cards and quick Work export. */
+.summary{grid-template-columns:repeat(4,minmax(0,1fr))}
+.summary>div:last-child{border-color:#c9d7e6;background:#f0f7ff}
+.review-controls.exclude-only{align-items:center;justify-content:space-between;gap:12px}
+.review-controls.exclude-only>span{font-size:12px;font-weight:700;color:#52677a}
+.review-controls.exclude-only .choice{min-width:130px;min-height:40px;font-size:13px}
+.review-controls.exclude-only .choice.selected{background:#f9fafb;color:#374151;border:1px solid #b7c1cc}
+.file-actions #exportWork{font-size:13px}
+@media(max-width:540px){.summary{grid-template-columns:repeat(2,minmax(0,1fr))}.review-controls.exclude-only{flex-wrap:wrap}.review-controls.exclude-only>span{flex:1 1 100%}.review-controls.exclude-only .choice{flex:1 1 100%;font-size:13px}}

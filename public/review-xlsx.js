@@ -1,4 +1,4 @@
-/* PIA v0.3.35 - XLSX reader: local browser, no CDN/upload. */
+/* PIA v0.3.37 - XLSX reader: supports Work iterative sheet names; local browser only. */
 (function(root){
  'use strict';
  const NS='http://schemas.openxmlformats.org/spreadsheetml/2006/main';
@@ -73,15 +73,23 @@
  async function parseSelectionXlsx(buffer){
   const z=zipEntries(buffer),book=xml(await unzipText(z,'xl/workbook.xml')),rels=xml(await unzipText(z,'xl/_rels/workbook.xml.rels'));
   const sheets=[...els(book,'sheet')];
-  const sel=sheets.find(e=>e.getAttribute('name')==='사용자 최종 선별')||sheets.find(e=>e.getAttribute('name')==='전체1041건 검수');
-  if(!sel)bad('사용자 최종 선별 시트를 찾지 못했습니다.');
-  const id=sel.getAttributeNS(REL,'id'),link=[...rels.documentElement.children].find(e=>e.getAttribute('Id')===id);
-  if(!link)bad('시트 링크가 없습니다.');
-  let target=link.getAttribute('Target')||'';
-  target=target.startsWith('/xl/')?target.slice(1):target.startsWith('xl/')?target:'xl/'+target.replace(/^\.\//,'');
-  if(!/^xl\/worksheets\/sheet\d+\.xml$/.test(target))bad('허용되지 않는 시트 경로입니다.');
+  if(!sheets.length)bad('검토본 시트가 없습니다.');
+  const rank=name=>name==='사용자 최종 선별'?0:name==='전체1041건 검수'?1:/검토|선별|검수|게시물/.test(name)?2:3;
+  sheets.sort((a,b)=>rank(a.getAttribute('name')||'')-rank(b.getAttribute('name')||''));
   const shared=z.has('xl/sharedStrings.xml')?[...els(xml(await unzipText(z,'xl/sharedStrings.xml')),'si')].map(rich):[];
-  return {sheet:sel.getAttribute('name'),records:rowsOf(xml(await unzipText(z,target)),shared)};
+  const relationships=[...rels.documentElement.children];
+  const failures=[];
+  for(const sel of sheets){
+   const id=sel.getAttributeNS(REL,'id'),link=relationships.find(e=>e.getAttribute('Id')===id);
+   if(!link)continue;
+   let target=link.getAttribute('Target')||'';
+   target=target.startsWith('/xl/')?target.slice(1):target.startsWith('xl/')?target:'xl/'+target.replace(/^\.\//,'');
+   // Reject traversal and external links: only conventional worksheet entries may be opened.
+   if(!/^xl\/worksheets\/sheet\d+\.xml$/.test(target))continue;
+   try{return {sheet:sel.getAttribute('name'),records:rowsOf(xml(await unzipText(z,target)),shared)}}
+   catch(e){failures.push((sel.getAttribute('name')||'시트')+': '+e.message)}
+  }
+  bad('게시물 ID·선택·작성자·본문 등의 필수 열이 있는 시트를 찾지 못했습니다. '+failures.slice(0,2).join('; '));
  }
  root.PIAReviewXlsx={parseSelectionXlsx};
 })(typeof window!=='undefined'?window:globalThis);

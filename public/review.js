@@ -1,9 +1,9 @@
-/* PIA v0.3.36 — Exclusion-first pre-import review; read-only DB comparison. */
+/* PIA v0.3.37 — Cumulative exclusions, repeat Work review, legacy state preservation. */
 (()=>{'use strict';
  const $=id=>document.getElementById(id);
  const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const validChoices=new Set(['미선택','등록','제외','보류']);
- const state={records:[],byId:new Map(),currentPage:0,filtered:[],fingerprint:'',source:'',images:new Map(),urls:[],modalUrl:'',issuesOpen:false,db:null,dbStatus:'idle',dbPostCount:0,dbMatches:new Map(),undo:[],viewReady:false};
+ const state={records:[],byId:new Map(),currentPage:0,filtered:[],fingerprint:'',source:'',images:new Map(),urls:[],modalUrl:'',issuesOpen:false,db:null,dbStatus:'idle',dbPostCount:0,dbMatches:new Map(),undo:[],ledger:new Map(),viewReady:false};
  const $all=id=>Array.from(document.querySelectorAll(id));
  let toastTimer,typingTimer,viewTimer;
  function notify(message,error=false){const t=$('toast');t.textContent=message;t.classList.toggle('error',error);t.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.hidden=true,4400)}
@@ -23,6 +23,27 @@
   x.choice=normalizedChoice(v.choice);x.memo=String(v.memo??'').slice(0,2000);x.fields['사용자 최종 선택']=x.choice;x.fields['사용자 메모']=x.memo;
   return x;
  }
+ // Persist excluded post IDs independently of the current Work workbook / review round.
+ function excludedEntry(x,previousChoice='미선택',source=state.source){
+  return {id:x.id,excludedAt:new Date().toISOString(),source:source||'',name:x.name,handle:x.handle,type:x.type,content:x.content,parent:x.parent,filename:x.source,memo:x.memo||'',previousChoice};
+ }
+ function ledgerArray(){return [...state.ledger.values()].sort((a,b)=>a.id.localeCompare(b.id,undefined,{numeric:true}))}
+ function ledgerFromRecords(rows,source=state.source){for(const x of rows)if(x.choice==='제외'&&!state.ledger.has(x.id))state.ledger.set(x.id,excludedEntry(x,'미선택',source))}
+ function loadLedger(rows){const next=new Map();for(const x of (Array.isArray(rows)?rows:[])){
+   const id=String(x?.id||'');if(!/^P\d{3,6}$/.test(id)||next.has(id)||next.size>=10000)continue;
+   next.set(id,{id,excludedAt:String(x.excludedAt||''),source:String(x.source||''),name:String(x.name||''),handle:String(x.handle||''),type:String(x.type||''),content:String(x.content||''),parent:String(x.parent||''),filename:String(x.filename||''),memo:String(x.memo||'').slice(0,2000),previousChoice:normalizedChoice(x.previousChoice)});
+  }return next;
+ }
+ function enforceExclusions(rows){for(const r of rows){if(state.ledger.has(r.id)){
+   r.choice='제외';r.fields['사용자 최종 선택']='제외';
+  }}return rows}
+ function saveChoicesAndLedger(changed){return new Promise((ok,bad)=>{
+  if(!state.db){bad(Error('로컬 저장소에 연결되지 않았습니다.'));return}
+  const tx=state.db.transaction(['data','choices'],'readwrite');const choices=tx.objectStore('choices');
+  for(const x of changed)choices.put({id:x.id,choice:x.choice,memo:x.memo});
+  tx.objectStore('data').put(ledgerArray(),'exclusionLedger');
+  tx.oncomplete=ok;tx.onerror=()=>bad(tx.error);tx.onabort=()=>bad(tx.error);
+ })}
  function openDatabase(){return new Promise((resolve,reject)=>{
   if(!('indexedDB' in window)){reject(Error('브라우저 로컬 저장소를 사용할 수 없습니다.'));return}
   const request=indexedDB.open('pia-preimport-review-v1',1);
@@ -41,8 +62,8 @@
   state.currentPage=0;state.issuesOpen=false;state.undo=[];
   const authors=[...new Set(records.map(x=>x.handle||x.name).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ko'));
   $('authorFilter').innerHTML='<option value="">전체 작성자</option>'+authors.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
-  ['query','authorFilter','auditFilter','typeFilter','duplicateFilter'].forEach(id=>$(id).value='');$('choiceFilter').value='미선택';$('sortFilter').value='original';
-  ['exportCsv','exportJson','openIssues'].forEach(id=>$(id).disabled=false);
+  ['query','authorFilter','auditFilter','typeFilter','duplicateFilter'].forEach(id=>$(id).value='');$('choiceFilter').value='active';$('sortFilter').value='original';
+  ['exportCsv','exportJson','exportWork'].forEach(id=>$(id).disabled=false);
   updateDbMatches();refresh();
  }
  async function digest(buffer){const bytes=await crypto.subtle.digest('SHA-256',buffer);return [...new Uint8Array(bytes)].map(x=>x.toString(16).padStart(2,'0')).join('')}
@@ -51,36 +72,48 @@
   saveLabel('엑셀 분석 중…');
   const buffer=await file.arrayBuffer();const {records:rows}=await window.PIAReviewXlsx.parseSelectionXlsx(buffer);
   const fingerprint=await digest(buffer),old=state.fingerprint;
-  if(old&&old!==fingerprint&&!confirm(`지금 열려 있는 ${state.records.length}건의 선별 데이터를 새 파일로 바꿀까요?\n교체 전에 진행 내용 백업 JSON을 받는 것을 권장합니다.`)){saveLabel('교체 취소');return}
+  if(old&&old!==fingerprint&&!confirm(`현재 ${state.records.length}건의 검토본을 새 Work 파일로 교체할까요?\n기존 제외 ${state.ledger.size}건은 누적 유지됩니다. 백업 JSON을 먼저 저장해 주세요.`)){saveLabel('교체 취소');return}
   const data=rows.map(recordOf);
-  // Reopening an unchanged workbook restores previously saved choices from this browser.
-  if(old===fingerprint&&state.records.length){for(const x of data){const prev=state.byId.get(x.id);if(prev){x.choice=prev.choice;x.memo=prev.memo;x.fields['사용자 최종 선택']=x.choice;x.fields['사용자 메모']=x.memo}}}
+  // Never drop excluded IDs when the next Work workbook omits already excluded rows.
+  ledgerFromRecords(state.records);
+  for(const x of data){const prev=state.byId.get(x.id);if(prev){
+   x.choice=prev.choice;x.memo=prev.memo;x.fields['사용자 최종 선택']=x.choice;x.fields['사용자 메모']=x.memo;
+  }}
+  enforceExclusions(data);ledgerFromRecords(data);
   const bundle={format:'pia-review-v1',fingerprint,source:file.name,records:data,updatedAt:new Date().toISOString()};
-  if(state.db)await dbSaveBundle(bundle);
+  if(state.db){await dbSaveBundle(bundle);await dbPut('data',ledgerArray(),'exclusionLedger')}
   setRecords(data,fingerprint,file.name);state.viewReady=true;storeView();
-  saveLabel(state.db?`${data.length.toLocaleString()}건 불러옴 · 자동 저장됨`:'로컬 저장 불가 · 반드시 JSON 백업');
-  notify(`${data.length.toLocaleString()}건을 불러왔습니다. 아직 PIA DB에는 등록하지 않았습니다.`);
+  saveLabel(state.db?`${data.length.toLocaleString()}건 · 제외 누적 ${state.ledger.size}건 보존`:'로컬 저장 불가 · 반드시 JSON 백업');
+  notify(`새 검토본 ${data.length.toLocaleString()}건을 불러왔습니다. 기존 제외 ${state.ledger.size}건은 유지됩니다.`);
  }
  async function restoreBackup(file){
   if(!file)return;
   const payload=JSON.parse(await file.text());
-  if(payload?.format!=='pia-review-v1'||!Array.isArray(payload.records)||payload.records.length<1||payload.records.length>10000)throw Error('이 화면에서 생성된 PIA 선별 백업 JSON이 아닙니다.');
+  if(payload?.format!=='pia-review-v1'||!Array.isArray(payload.records)||payload.records.length<1||payload.records.length>10000)throw Error('PIA 선별 백업 JSON이 아닙니다.');
   const records=payload.records.map(cleanRecord);
   if(records.some(x=>!x))throw Error('백업 데이터가 손상됐거나 필수 항목이 없습니다.');
-  if(state.records.length&&!confirm('현재 선별 작업을 백업 내용으로 교체할까요? 저장 중인 결과는 덮어씁니다.'))return;
+  if(state.records.length&&!confirm('백업 데이터로 현재 검토본을 교체할까요? 제외 이력은 기존+백업을 합쳐 보존합니다.'))return;
+  ledgerFromRecords(state.records);const previous=ledgerArray();state.ledger=loadLedger(previous);
+  for(const [id,e] of loadLedger(payload.exclusionLedger||[]))if(!state.ledger.has(id))state.ledger.set(id,e);
   const fingerprint=String(payload.fingerprint||'backup-'+Date.now()),source=String(payload.source||'JSON 백업');
-  if(state.db)await dbSaveBundle({format:'pia-review-v1',fingerprint,source,records,updatedAt:new Date().toISOString()});
-  setRecords(records,fingerprint,source);state.viewReady=true;storeView();saveLabel(state.db?'백업 복원 완료 · 자동 저장됨':'로컬 저장 불가 · 반드시 JSON 백업');notify(`선별 결과 ${records.length.toLocaleString()}건을 복원했습니다.`);
+  ledgerFromRecords(records,source);enforceExclusions(records);
+  if(state.db){await dbSaveBundle({format:'pia-review-v1',fingerprint,source,records,updatedAt:new Date().toISOString()});await dbPut('data',ledgerArray(),'exclusionLedger')}
+  setRecords(records,fingerprint,source);state.viewReady=true;storeView();
+  saveLabel(state.db?'백업 복원 완료 · 누적 제외 보존':'로컬 저장 불가 · 반드시 JSON 백업');
+  notify(`검토본 ${records.length.toLocaleString()}건 복원 · 누적 제외 ${state.ledger.size}건`);
  }
  async function resume(){
   try{state.db=await openDatabase();const bundle=await dbGet('data','active');if(!bundle?.records?.length)return;
    const records=bundle.records.map(cleanRecord);if(records.some(x=>!x))throw Error('로컬 저장 데이터가 손상됐습니다.');
    const choices=await dbLoadChoices(),map=new Map(choices.map(x=>[x.id,x]));
    for(const x of records){const choice=map.get(x.id);if(choice){x.choice=normalizedChoice(choice.choice);x.memo=String(choice.memo||'');x.fields['사용자 최종 선택']=x.choice;x.fields['사용자 메모']=x.memo}}
+   const savedLedger=await dbGet('data','exclusionLedger');state.ledger=loadLedger(savedLedger);
+   ledgerFromRecords(records);enforceExclusions(records);
+   if(!Array.isArray(savedLedger))await dbPut('data',ledgerArray(),'exclusionLedger');
    const view=await dbGet('data','viewPrefs');setRecords(records,bundle.fingerprint,bundle.source);
    if(view&&view.fingerprint===state.fingerprint){for(const k of ['query','authorFilter','auditFilter','choiceFilter','typeFilter','duplicateFilter','sortFilter','pageSize']){
      const value=view[k];if(typeof value!=='string')continue;
-     if(k==='query'||[...$(k).options].some(opt=>opt.value===value))$(k).value=value;
+     if(k==='choiceFilter'&&value==='미선택')$(k).value='active';else if(k==='query'||[...$(k).options].some(opt=>opt.value===value))$(k).value=value;
     }state.currentPage=Math.max(0,Number(view.page)||0)}state.viewReady=true;refresh();saveLabel(`${records.length.toLocaleString()}건 · 이전 작업 복원`);
   }catch(e){saveLabel('로컬 저장 불가 · 백업을 자주 받아 주세요');notify('자동 저장 복원 실패: '+e.message,true)}
  }
@@ -114,10 +147,33 @@
  function updateDbMatches(){if(state.dbStatus!=='ready')return;state.dbMatches=matchExisting(state.records,state.dbAccounts||[],state.dbPosts||[]);updateDbStatus()}
  function updateDbStatus(){const el=$('dbCompareStatus');if(!el)return;const labels={idle:'기존 DB 비교 대기',loading:'기존 DB와 비교 중…',error:'기존 DB 비교 실패 · 새로고침 필요',ready:`DB ${state.dbPostCount.toLocaleString()}건 비교 완료 · 중복 후보 ${state.dbMatches.size.toLocaleString()}건`};el.textContent=labels[state.dbStatus]||labels.idle;el.classList.toggle('error',state.dbStatus==='error');$('refreshDb').disabled=state.dbStatus==='loading'}
  async function refreshExistingDb(){if(state.dbStatus==='loading')return;state.dbStatus='loading';updateDbStatus();try{const response=await fetch('/api/admin-data',{credentials:'same-origin',cache:'no-store'});if(!response.ok)throw Error('관리자 세션 또는 DB 조회 오류 ('+response.status+')');const data=await response.json();if(!Array.isArray(data.posts)||!Array.isArray(data.accounts))throw Error('DB 조회 결과 형식 오류');state.dbAccounts=data.accounts;state.dbPosts=data.posts;state.dbPostCount=data.posts.length;state.dbStatus='ready';updateDbMatches();refresh()}catch(e){state.dbStatus='error';state.dbMatches=new Map();updateDbStatus();notify('기존 DB 중복 비교 실패: '+e.message,true);refresh()}}
- function updateQuickUI(){const quick=$('choiceFilter').value==='미선택';$('quickUnselected').classList.toggle('active',quick);$('quickAll').classList.toggle('active',!quick);$('undoChoice').disabled=!state.undo.length;$('quickStatus').textContent=quick?'빠른 제외 모드: 결정한 글은 목록에서 바로 사라집니다.':'모두 보기: 이전에 제외한 글도 다시 변경할 수 있습니다.'}
- function commitChoice(changes,label){if(!changes.length)return;const batch=[];for(const c of changes){const x=state.byId.get(c.id);if(!x||x.choice===c.choice)continue;batch.push({id:x.id,choice:x.choice});x.choice=c.choice;x.fields['사용자 최종 선택']=c.choice}
-  if(!batch.length)return;state.undo.push(batch);if(state.undo.length>50)state.undo.shift();updateQuickUI();const changed=batch.map(a=>state.byId.get(a.id));if(state.db)dbSaveChoices(changed).then(()=>saveLabel('자동 저장됨 · JSON 백업 권장')).catch(e=>{saveLabel('저장 실패 · JSON 백업 필요');notify('선택 저장 실패: '+e.message,true)});else saveLabel('로컬 저장 불가 · 반드시 JSON 백업');refresh();notify(label+` · ${batch.length}건 선택 (되돌리기 가능)`)}
- function undoLast(){const batch=state.undo.pop();if(!batch)return;const changed=[];for(const a of batch){const x=state.byId.get(a.id);if(!x)continue;x.choice=a.choice;x.fields['사용자 최종 선택']=x.choice;changed.push(x)}if(state.db)dbSaveChoices(changed).then(()=>saveLabel('자동 저장됨 · JSON 백업 권장')).catch(e=>notify('되돌리기 저장 실패: '+e.message,true));refresh();notify(`${changed.length}건의 마지막 선별 작업을 되돌렸습니다.`)}
+ function updateQuickUI(){const quick=$('choiceFilter').value==='active';$('quickUnselected').classList.toggle('active',quick);$('quickAll').classList.toggle('active',!quick);$('undoChoice').disabled=!state.undo.length;
+  $('quickStatus').textContent=quick?'제외만 선택하세요. 나머지 글은 다음 Work 검토본에 남습니다.':'전체 보기: 이전에 제외한 글도 취소할 수 있습니다.';
+ }
+ function commitChoice(changes,label){
+  if(!changes.length)return;const batch=[];
+  for(const c of changes){const x=state.byId.get(c.id);if(!x||!['제외','미선택'].includes(c.choice)||x.choice===c.choice)continue;
+   batch.push({id:x.id,choice:x.choice,ledger:state.ledger.get(x.id)||null});
+   if(c.choice==='제외')state.ledger.set(x.id,excludedEntry(x,x.choice));
+   else state.ledger.delete(x.id);
+   x.choice=c.choice;x.fields['사용자 최종 선택']=c.choice;
+  }
+  if(!batch.length)return;
+  state.undo.push(batch);if(state.undo.length>50)state.undo.shift();updateQuickUI();
+  const changed=batch.map(a=>state.byId.get(a.id));
+  if(state.db)saveChoicesAndLedger(changed).then(()=>saveLabel('제외 상태·이력 자동 저장됨')).catch(e=>{saveLabel('저장 실패 · JSON 백업 필요');notify('선별 저장 실패: '+e.message,true)});
+  else saveLabel('로컬 저장 불가 · 반드시 JSON 백업');
+  refresh();notify(label+` · ${batch.length}건 (되돌리기 가능)`);
+ }
+ function undoLast(){const batch=state.undo.pop();if(!batch)return;const changed=[];
+  for(const a of batch){const x=state.byId.get(a.id);if(!x)continue;
+   x.choice=a.choice;x.fields['사용자 최종 선택']=x.choice;
+   if(a.ledger)state.ledger.set(a.id,a.ledger);else state.ledger.delete(a.id);
+   changed.push(x);
+  }
+  if(state.db)saveChoicesAndLedger(changed).then(()=>saveLabel('제외 상태·이력 자동 저장됨')).catch(e=>notify('되돌리기 저장 실패: '+e.message,true));
+  refresh();notify(`${changed.length}건의 마지막 선별 작업을 되돌렸습니다.`);
+ }
  function ensureSave(record){
   if(!state.db){saveLabel('로컬 저장 불가 · 반드시 JSON 백업');return}
   saveLabel('선택 저장 중…');
@@ -142,13 +198,13 @@
   }
   return out;
  }
- function updateSummary(){const c=decisionTotals();$('countAll').textContent=state.records.length.toLocaleString();$('countNone').textContent=c.미선택.toLocaleString();$('countKeep').textContent=c.등록.toLocaleString();$('countExclude').textContent=c.제외.toLocaleString();$('countHold').textContent=c.보류.toLocaleString();const is=issues();$('issueCount').textContent=is.length;return is}
+ function updateSummary(){const c=decisionTotals();$('countAll').textContent=state.records.length.toLocaleString();$('countNone').textContent=(state.records.length-c.제외).toLocaleString();$('countExclude').textContent=c.제외.toLocaleString();$('countLedger').textContent=state.ledger.size.toLocaleString();const is=issues();$('issueCount').textContent=is.length;return is}
  function filteredRows(){
   const q=$('query').value.trim().toLocaleLowerCase(),exactId=/^p\d{3,6}$/.test(q),author=$('authorFilter').value,audit=$('auditFilter').value,choice=$('choiceFilter').value,type=$('typeFilter').value,dup=$('duplicateFilter').value,sort=$('sortFilter').value;
   const rows=state.records.filter(x=>{
    if(q&&(exactId?x.id.toLocaleLowerCase()!==q:![x.id,x.name,x.handle,x.content,x.quoteContent,x.source,x.notes].some(t=>String(t||'').toLocaleLowerCase().includes(q))))return false;
    if(author&&(x.handle||x.name)!==author)return false;
-   if(audit&&x.audit!==audit)return false;if(choice&&x.choice!==choice)return false;
+   if(audit&&x.audit!==audit)return false;if(choice==='active'&&x.choice==='제외')return false; if(choice&&choice!=='active'&&x.choice!==choice)return false;
    if(type&&x.type!==type)return false;
    if(dup==='confirmed'&&!x.duplicate.includes('확정 중복'))return false;
    if(dup==='suspected'&&!x.duplicate.includes('중복 의심'))return false;
@@ -175,7 +231,7 @@
   let pic='';if(img){const url=URL.createObjectURL(img);state.urls.push(url);pic=`<img class="snapshot-thumb" src="${esc(url)}" loading="lazy" alt="${esc(x.id)} 원본 캡처 미리보기" data-show-image="${esc(x.id)}">`}
   const issueText=[x.notes,x.dateStatus,x.relation].filter(Boolean).join(' · ').slice(0,1400);
   const note=x.memo||'';
-  return `<article class="post-card" id="card-${esc(x.id)}" data-post-id="${esc(x.id)}"><div class="avatar">${esc((x.name||'?').trim()[0]||'?')}</div><div class="post-main"><div class="post-head"><strong class="display-name">${esc(x.name||'작성자 미확정')}</strong><span class="handle">${esc(x.handle||'@아이디 미확정')}</span><span class="post-time">${esc(x.date||'시각 미확정')}</span><span class="post-id">${esc(x.id)}</span></div><div class="chips"><span class="chip">${esc(typeName)}</span><span class="chip ${reviewColor}">${esc('검수: '+x.audit)}</span>${x.duplicate.includes('확정 중복')?'<span class="chip bad">확정 중복</span>':x.duplicate.includes('중복 의심')?'<span class="chip warn">중복 의심</span>':''}${x.dateStatus.includes('시간추정')?'<span class="chip warn">시간 +5분 추정</span>':''}${dbHits.length?'<span class="chip bad">⚠ DB 기존 글 후보</span>':''}</div>${parentHtml}<div class="post-body">${esc(x.content||'[본문 없음 · 원본 확인 필요]')}</div>${quoteHtml}<div class="review-controls"><span>보관 여부</span>${[['등록','keep'],['제외','exclude'],['보류','hold'],['미선택','none']].map(([label,cls])=>`<button type="button" class="choice ${cls}${x.choice===label?' selected':''}" data-choose="${esc(label)}" data-id="${esc(x.id)}" aria-pressed="${x.choice===label}">${esc(label)}</button>`).join('')}</div><details class="post-detail" ${dbHits.length||note?'open':''}><summary>검수 근거 · 원본 이미지 · 메모 ${dbHits.length?'(DB 중복 후보 확인)':''}</summary><div class="evidence"><p><strong>원본</strong> · ${esc(filenameOf(x.source)||'미확정')}</p>${dupHtml}${dbHitHtml}${issueText?`<p><strong>검수 메모</strong> · ${esc(issueText)}</p>`:''}${pic}<button type="button" data-show-image="${esc(x.id)}" class="image-open" ${!img?'disabled title="원본 캡처 폴더 연결 후 사용 가능"':''}>${img?'🔎 원본 캡처 확대':'📷 캡처 폴더 연결 후 이미지 확인'}</button></div><label class="memo-label" for="memo-${esc(x.id)}">선별 메모<textarea id="memo-${esc(x.id)}" data-memo="${esc(x.id)}" maxlength="2000" rows="2" placeholder="제외 이유 또는 나중에 확인할 내용">${esc(note)}</textarea></label></details></div></article>`;
+  return `<article class="post-card" id="card-${esc(x.id)}" data-post-id="${esc(x.id)}"><div class="avatar">${esc((x.name||'?').trim()[0]||'?')}</div><div class="post-main"><div class="post-head"><strong class="display-name">${esc(x.name||'작성자 미확정')}</strong><span class="handle">${esc(x.handle||'@아이디 미확정')}</span><span class="post-time">${esc(x.date||'시각 미확정')}</span><span class="post-id">${esc(x.id)}</span></div><div class="chips"><span class="chip">${esc(typeName)}</span><span class="chip ${reviewColor}">${esc('검수: '+x.audit)}</span>${x.duplicate.includes('확정 중복')?'<span class="chip bad">확정 중복</span>':x.duplicate.includes('중복 의심')?'<span class="chip warn">중복 의심</span>':''}${x.dateStatus.includes('시간추정')?'<span class="chip warn">시간 +5분 추정</span>':''}${dbHits.length?'<span class="chip bad">⚠ DB 기존 글 후보</span>':''}</div>${parentHtml}<div class="post-body">${esc(x.content||'[본문 없음 · 원본 확인 필요]')}</div>${quoteHtml}<div class="review-controls exclude-only"><span>${x.choice==='제외'?'제외 목록에 기록됨':x.choice==='등록'||x.choice==='보류'?'이전 선별 표시: '+esc(x.choice):'제외할 글만 선택'}</span><button type="button" class="choice exclude${x.choice==='제외'?' selected':''}" data-choose="${x.choice==='제외'?'미선택':'제외'}" data-id="${esc(x.id)}" aria-pressed="${x.choice==='제외'}">${x.choice==='제외'?'↶ 제외 취소':'✕ 제외하기'}</button></div><details class="post-detail" ${dbHits.length||note?'open':''}><summary>검수 근거 · 원본 이미지 · 메모 ${dbHits.length?'(DB 중복 후보 확인)':''}</summary><div class="evidence"><p><strong>원본</strong> · ${esc(filenameOf(x.source)||'미확정')}</p>${dupHtml}${dbHitHtml}${issueText?`<p><strong>검수 메모</strong> · ${esc(issueText)}</p>`:''}${pic}<button type="button" data-show-image="${esc(x.id)}" class="image-open" ${!img?'disabled title="원본 캡처 폴더 연결 후 사용 가능"':''}>${img?'🔎 원본 캡처 확대':'📷 캡처 폴더 연결 후 이미지 확인'}</button></div><label class="memo-label" for="memo-${esc(x.id)}">선별 메모<textarea id="memo-${esc(x.id)}" data-memo="${esc(x.id)}" maxlength="2000" rows="2" placeholder="제외 이유 또는 나중에 확인할 내용">${esc(note)}</textarea></label></details></div></article>`;
  }
  function renderIssues(items){
   const existing=$('issueDetails');if(existing)existing.remove();if(!state.issuesOpen||!items.length)return;
@@ -188,14 +244,14 @@
   state.filtered=all;state.currentPage=Math.min(state.currentPage,Math.max(0,Math.ceil(all.length/size)-1));
   const page=all.slice(state.currentPage*size,(state.currentPage+1)*size);
   $('shownCount').textContent=`전체 ${state.records.length.toLocaleString()}건 중 ${all.length.toLocaleString()}건 표시`;
-  $('pageLabel').textContent=`현재 페이지 ${page.length}건 · 제외는 확인창 없이 즉시 반영`;updateQuickUI();
+  $('pageLabel').textContent=`현재 페이지 ${page.length}건 · 제외한 글은 Work에서만 제거`;updateQuickUI();
   $('pageInfo').textContent=all.length?`${state.currentPage+1} / ${Math.ceil(all.length/size)} 페이지`:'—';
   $('prevPage').disabled=state.currentPage===0||!all.length;$('nextPage').disabled=(state.currentPage+1)*size>=all.length;
-  ['bulkKeep','bulkExclude','bulkHold'].forEach(id=>$(id).disabled=!page.length);
+  $('bulkExclude').disabled=!page.length;
   revokeThumbs();$('feed').innerHTML=page.length?page.map(renderCard).join(''):`<div class="empty-state"><strong>${state.records.length?'검색 조건에 맞는 게시물이 없습니다.':'아직 불러온 데이터가 없어요'}</strong><p>${state.records.length?'필터를 변경해 주세요.':'Work의 사용자 최종 선별표 엑셀을 불러오세요.'}</p></div>`;
   renderIssues(items);storeView();
  }
- function setChoice(id,choice){const x=state.byId.get(id);if(!x||!validChoices.has(choice))return;commitChoice([{id,choice}],`${id} → ${choice}`)}
+ function setChoice(id,choice){const x=state.byId.get(id);if(!x||!['제외','미선택'].includes(choice))return;commitChoice([{id,choice}],`${id} → ${choice}`)}
  function filteredPage(){const size=Number($('pageSize').value)||20;return state.filtered.slice(state.currentPage*size,(state.currentPage+1)*size)}
  function chooseBulk(choice){const items=filteredPage();if(!items.length)return;commitChoice(items.map(x=>({id:x.id,choice})),`현재 페이지 ${choice}`)}
  function jumpTo(id){if(!state.byId.has(id)){notify('선별표에 해당 ID가 없습니다.',true);return}
@@ -204,7 +260,8 @@
  function closeModal(){if(state.modalUrl){URL.revokeObjectURL(state.modalUrl);state.modalUrl=''}$('imageModal').hidden=true;$('modalImage').removeAttribute('src')}
  function openImage(id){const r=state.byId.get(id),file=r&&imageFileFor(r);if(!file){notify('먼저 원본 캡처 폴더를 연결해 주세요.',true);return}closeModal();state.modalUrl=URL.createObjectURL(file);$('modalImage').src=state.modalUrl;$('modalFilename').textContent=file.name;$('modalTitle').textContent=`원본 캡처 · ${id}`;$('imageModal').hidden=false}
  function download(blob,name){const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),3000)}
- function exportBackup(){if(!state.records.length)return;const obj={format:'pia-review-v1',version:1,source:state.source,fingerprint:state.fingerprint,savedAt:new Date().toISOString(),records:state.records};download(new Blob([JSON.stringify(obj,null,2)],{type:'application/json;charset=utf-8'}),'PIA_선별진행_백업_'+new Date().toISOString().slice(0,10)+'.json');notify('현재 선택 상태 전체를 JSON으로 백업했습니다.')}
+ function exportBackup(){if(!state.records.length)return;const obj={format:'pia-review-v1',version:1,source:state.source,fingerprint:state.fingerprint,savedAt:new Date().toISOString(),records:state.records,exclusionLedger:ledgerArray()};download(new Blob([JSON.stringify(obj,null,2)],{type:'application/json;charset=utf-8'}),'PIA_선별진행_백업_'+new Date().toISOString().slice(0,10)+'.json');notify('현재 선택 상태 전체를 JSON으로 백업했습니다.')}
+ function exportWorkXlsx(){if(!state.records.length)return;try{const blob=window.PIAReviewExportXlsx.createWorkbook({records:state.records,ledger:ledgerArray(),source:state.source});download(blob,'PIA_Work_제외체크_누적이력_'+new Date().toISOString().slice(0,10)+'.xlsx');notify(`제외 체크표와 누적 제외 ${state.ledger.size}건을 엑셀로 저장했습니다.`)}catch(e){notify('제외 엑셀 생성 오류: '+e.message,true)}}
  const csvSafe=v=>{
   let s=String(v??'');
   // Guard spreadsheet formula execution when CSV is opened in Excel.
@@ -229,12 +286,12 @@
   $('imageFolder').addEventListener('change',e=>{const files=[...e.target.files||[]].filter(f=>/^image\//.test(f.type)||/\.(jpe?g|png|webp)$/i.test(f.name));state.images=new Map(files.map(f=>[f.name.toLowerCase(),f]));refresh();notify(`캡처 이미지 ${state.images.size}개를 이 브라우저에서 연결했습니다. 서버로 전송하지 않았습니다.`)});
   for(const id of ['authorFilter','auditFilter','choiceFilter','typeFilter','duplicateFilter','sortFilter','pageSize'])$(id).addEventListener('change',onFilters);
   $('query').addEventListener('input',()=>{clearTimeout(typingTimer);typingTimer=setTimeout(onFilters,130)});
-  $('clearFilters').onclick=()=>{['query','authorFilter','auditFilter','typeFilter','duplicateFilter'].forEach(id=>$(id).value='');$('choiceFilter').value='미선택';$('sortFilter').value='original';onFilters()};
-  $('quickUnselected').onclick=()=>{$('choiceFilter').value='미선택';onFilters()};$('quickAll').onclick=()=>{$('choiceFilter').value='';onFilters()};$('undoChoice').onclick=undoLast;$('refreshDb').onclick=refreshExistingDb;
+  $('clearFilters').onclick=()=>{['query','authorFilter','auditFilter','typeFilter','duplicateFilter'].forEach(id=>$(id).value='');$('choiceFilter').value='active';$('sortFilter').value='original';onFilters()};
+  $('quickUnselected').onclick=()=>{$('choiceFilter').value='active';onFilters()};$('quickAll').onclick=()=>{$('choiceFilter').value='';onFilters()};$('undoChoice').onclick=undoLast;$('refreshDb').onclick=refreshExistingDb;
   $('prevPage').onclick=()=>{state.currentPage=Math.max(0,state.currentPage-1);refresh();$('feed').scrollIntoView({block:'start'})};
   $('nextPage').onclick=()=>{state.currentPage++;refresh();$('feed').scrollIntoView({block:'start'})};
-  $('bulkKeep').onclick=()=>chooseBulk('등록');$('bulkExclude').onclick=()=>chooseBulk('제외');$('bulkHold').onclick=()=>chooseBulk('보류');
-  $('exportJson').onclick=exportBackup;$('exportCsv').onclick=exportSelectionCsv;
+  $('bulkExclude').onclick=()=>chooseBulk('제외');
+  $('exportJson').onclick=exportBackup;$('exportWork').onclick=exportWorkXlsx;$('exportCsv').onclick=exportSelectionCsv;
   $('openIssues').onclick=()=>{state.issuesOpen=!state.issuesOpen;refresh();$('issueDetails')?.scrollIntoView({block:'nearest'})};
   $('feed').addEventListener('click',e=>{const el=e.target.closest('[data-choose],[data-jump],[data-show-image]');if(!el)return;
    if(el.dataset.choose)setChoice(el.dataset.id,el.dataset.choose);
@@ -253,5 +310,5 @@
   }catch(err){$('loginPanel').hidden=false;$('workspace').hidden=true;$('loginStatus').textContent='관리자 인증 확인 오류: '+err.message}
  }
  bind();auth();
- window.PIA_REVIEW_TEST={recordOf,issues:()=>issues(),state,matchExisting,shingleScore,normalizeBody,setChoice,undoLast,chooseBulk,downloadChoiceCsv:exportSelectionCsv};
+ window.PIA_REVIEW_TEST={recordOf,issues:()=>issues(),state,matchExisting,shingleScore,normalizeBody,setChoice,undoLast,chooseBulk,downloadChoiceCsv:exportSelectionCsv,ledgerFromRecords,enforceExclusions,loadLedger,ledgerArray,importWorkbook,restoreBackup,resume};
 })();
