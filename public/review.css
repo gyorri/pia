@@ -24,3 +24,63 @@
 .review-controls.exclude-only .choice.selected{background:#f9fafb;color:#374151;border:1px solid #b7c1cc}
 .file-actions #exportWork{font-size:13px}
 @media(max-width:540px){.summary{grid-template-columns:repeat(2,minmax(0,1fr))}.review-controls.exclude-only{flex-wrap:wrap}.review-controls.exclude-only>span{flex:1 1 100%}.review-controls.exclude-only .choice{flex:1 1 100%;font-size:13px}}
+
+/* v0.3.38 · compact fast review, grouped review and keyboard triage. */
+.mode-panel{display:flex;align-items:center;gap:16px;flex-wrap:wrap;background:#fff;border:1px solid #dfe8f0;border-radius:14px;margin:-3px 0 14px;padding:11px 14px}
+.mode-tabs{display:flex;gap:5px;flex-wrap:wrap;background:#edf3f7;border-radius:11px;padding:4px}
+.mode-tabs button{border:0;background:transparent;padding:9px 14px;color:#3c566e;border-radius:8px;font-size:13px;font-weight:800}
+.mode-tabs button.active{background:#fff;color:#0c5d9c;box-shadow:0 2px 7px #1a3b5a24}
+.mode-help{display:flex;gap:5px;flex:1 1 270px;justify-content:space-between;align-items:center;flex-wrap:wrap;color:#516b7e;font-size:12px}
+.shortcut-tip{font-size:11px;color:#718496;white-space:normal}
+kbd{display:inline-block;border:1px solid #ccd7e1;border-bottom-width:2px;background:#fff;padding:1px 5px;border-radius:5px;font-family:inherit;font-size:10px;font-weight:800;color:#355369}
+.group-settings{display:flex;align-items:center;gap:13px;flex-wrap:wrap;border-bottom:1px solid #e4ebf2;padding:12px 15px;background:#fcfdfe}
+.group-settings label{display:flex;align-items:center;gap:8px;white-space:nowrap;color:#345168;font-size:12px}
+.group-settings select{padding:7px 10px;border-radius:8px;font-size:12px}
+.group-settings p{font-size:11px}
+.batch-toolbar{display:flex;align-items:center;gap:9px;flex-wrap:wrap;padding:11px 15px;background:#f8fbff;border-bottom:1px solid #dde7f0}
+.batch-check{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:750;margin-right:4px;color:#36536a;cursor:pointer}
+.batch-check input,.quick-pick input{width:18px;height:18px;accent-color:#276caa;cursor:pointer}
+.batch-toolbar #batchCount{font-size:12px;color:#4e6479;font-weight:750;margin-right:auto}
+.batch-toolbar button{border-radius:9px;padding:8px 12px;font-size:12px;font-weight:800;border:1px solid #cbd9e5;background:#fff;color:#435b72}
+.batch-toolbar .batch-submit{background:#a82648;border-color:#a82648;color:#fff}
+.quick-row{display:flex;gap:11px;padding:13px 14px;border-bottom:1px solid #e7edf2;background:#fff;position:relative;outline:0;scroll-margin-top:18px}
+.quick-row:hover{background:#fafcff}.quick-row.checked{background:#f1f8ff}.quick-row.is-cursor{box-shadow:inset 3px 0 #1973bd;background:#f5faff}
+.quick-row.is-excluded{background:#fafafa;opacity:.8}
+.quick-pick{flex:0 0 24px;display:flex;align-items:flex-start;justify-content:center;padding-top:5px;cursor:pointer}
+.quick-content{min-width:0;flex:1}.quick-meta{display:flex;align-items:baseline;gap:7px;flex-wrap:wrap;margin:0 0 6px;color:#778696;font-size:11px}
+.quick-meta strong{color:#1a3248;font-size:13px;font-weight:800}.quick-meta .quick-id{color:#4f7495;font-size:11px;font-weight:800}
+.quick-text{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;line-height:1.55;color:#1c2b3c;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
+.mini-tags{display:flex;align-items:center;flex-wrap:wrap;gap:5px;margin-top:8px}
+.mini-tag{font-size:10px;font-weight:750;border:1px solid #dde5ed;color:#5c7081;background:#f3f6f9;border-radius:6px;padding:2px 6px}
+.mini-tag.danger{border-color:#f0c0c6;background:#fff2f2;color:#a02a3d}.mini-tag.caution{border-color:#f0d499;background:#fff9e8;color:#97651a}.mini-tag.excluded{border-color:#d7d9dc;background:#f1f2f3;color:#606c78}
+.quick-row-actions{flex:0 0 auto;display:flex;align-items:flex-start;padding-top:3px}
+.quick-exclude{white-space:nowrap;background:#fff;border:1px solid #e5acb8;color:#a22c48;padding:7px 11px;border-radius:8px;font-size:12px;font-weight:800}
+.quick-exclude:hover{background:#fff0f3}.quick-exclude.cancelled{color:#36526a;border-color:#c4d0da}
+.quick-detail{margin-top:6px;max-width:100%;border-radius:8px;color:#536f83;font-size:11px}
+.quick-detail summary{cursor:pointer;width:max-content;max-width:100%;font-size:11px;font-weight:750;padding:4px 0;color:#2c79b5;user-select:none}
+.quick-detail-inner{margin:5px 0;padding:12px;border:1px solid #e2eaf1;border-radius:10px;background:#fbfcfe}
+.quick-detail-inner p{margin:6px 0;font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere}
+.quick-detail-inner .quick-full{font-size:13px;line-height:1.7;color:#263d50}
+.quick-detail-inner label{display:block;margin-top:10px;font-size:12px}.quick-detail-inner textarea{display:block;width:100%;margin-top:5px;max-height:150px;resize:vertical}
+.quick-detail-actions{display:flex;flex-wrap:wrap;gap:7px;margin-top:10px}
+.quick-detail-actions button{border:1px solid #cadae9;color:#256a9b;background:#fff;border-radius:7px;padding:7px 10px;font-size:11px;font-weight:700}
+.compact-db{margin:8px 0;padding:9px;border:1px solid #ecc792;border-radius:8px;background:#fffbf0}.compact-db strong{color:#805521;font-size:12px}.compact-db p{font-size:11px}.compact-db a{color:#0876c0;text-decoration:underline}
+.review-group{border-bottom:9px solid #f2f6f9;background:#fff}
+.group-header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 15px;background:#f1f6fa;border-top:1px solid #dfe8f0;border-bottom:1px solid #dfe8f0}
+.group-header div{min-width:0;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}.group-header strong{overflow-wrap:anywhere;font-weight:800;font-size:13px;color:#254963}.group-header span{font-size:11px;color:#677b90}
+.group-header button{border:1px solid #b4cbdc;background:#fff;border-radius:8px;color:#27638b;padding:7px 10px;font-size:11px;font-weight:750;white-space:nowrap}
+@media(max-width:790px){.mode-panel{padding:10px}.mode-help{flex:1 1 100%}.mode-tabs{width:100%}.mode-tabs button{flex:1 1 auto;padding:8px 5px;font-size:12px}}
+@media(max-width:480px){.quick-row{padding:11px 9px;gap:7px}.quick-pick{flex-basis:22px}.quick-pick input{width:17px;height:17px}.quick-row-actions{padding-top:2px}.quick-exclude{font-size:11px;padding:7px 8px}.quick-meta{gap:5px;font-size:10px}.quick-meta strong{font-size:12px}.quick-text{font-size:12px}.mini-tag{font-size:9px}.group-header{padding:9px 10px}.batch-toolbar{padding:8px 10px}.batch-toolbar button{padding:7px 9px;font-size:11px}.group-settings{padding:9px 10px}}
+
+/* Wide focus layout for review modes; timeline keeps its original right help column. */
+#workspace[data-review-mode="quick"] .layout,#workspace[data-review-mode="groups"] .layout{grid-template-columns:225px minmax(0,1fr)}
+#workspace[data-review-mode="quick"] .help,#workspace[data-review-mode="groups"] .help{display:none}
+.mode-duplicate{font-size:11px;font-weight:800;white-space:nowrap;color:#8a4a17;background:#fff9ee;border:1px solid #edd3a9;padding:7px 9px;border-radius:8px}
+.mode-duplicate.active{background:#ab6627;color:#fff;border-color:#ab6627}
+@media(max-width:790px){#workspace[data-review-mode="quick"] .layout,#workspace[data-review-mode="groups"] .layout{grid-template-columns:minmax(0,1fr)}}
+
+/* Accessible fixed batch action, shown only for actively marked items. */
+.floating-batch{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);max-width:calc(100vw - 24px);width:max-content;z-index:150;display:flex;align-items:center;gap:10px;padding:10px 11px 10px 15px;border-radius:13px;background:#1e354c;color:#fff;box-shadow:0 10px 28px #0c1e3380;font-size:12px;font-weight:800}
+.floating-batch button{white-space:nowrap;padding:9px 11px;border-radius:8px;background:transparent;border:1px solid #8498ab;color:#fff;font-size:12px;font-weight:750}
+.floating-batch #floatingExclude{background:#fbe9ee;color:#9d2444;border-color:#fbe9ee}
+@media(max-width:420px){.floating-batch{bottom:10px;gap:6px;padding:8px 9px}.floating-batch button{font-size:11px;padding:8px}.floating-batch span{font-size:11px}}
