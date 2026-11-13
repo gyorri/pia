@@ -70,7 +70,7 @@ export async function handleGateRequest(request,env,next){
   if(!accept.includes('text/html')&&pathname!=='/'&&!pathname.endsWith('.html'))return new Response('Unauthorized',{status:401,headers:{'cache-control':'no-store'}});
   return page();
  }
- const response=await next();
+ const response=await next(role);
  // Avoid shared caches serving personalized archive content.
  const headers=new Headers(response.headers);headers.set('cache-control','private, no-store');return new Response(response.body,{status:response.status,statusText:response.statusText,headers});
 }

@@ -12,8 +12,10 @@ const kinds=['general','person','x','instagram','postype','report','chat','link'
 const statuses=['draft','needs_review','source_checked'];
 const imageTypes={'image/jpeg':'jpg','image/png':'png','image/webp':'webp','image/gif':'gif'};
 async function hmac(secret,message){const key=await crypto.subtle.importKey('raw',enc.encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);return toHex(await crypto.subtle.sign('HMAC',key,enc.encode(message)))}
-async function currentMember(req,env){
- const role=await readGateRole(req,env);
+async function currentMember(req,env,validatedGateRole=null){
+ // validatedGateRole is set ONLY by the server-side global gate.
+ // Standalone API routing still independently validates the signed cookie.
+ const role=validatedGateRole==='owner'?'owner':await readGateRole(req,env);
  return role?{id:null,username:'shared_member',display_name:'모임 구성원',role}:null;
 }
 const publicMember=m=>m?{id:m.id,username:m.username,name:m.display_name,role:m.role}:null;
@@ -34,18 +36,20 @@ function docPayload(data,existing=false){const title=bounded(data?.title,160);if
 async function folderExists(DB,id){if(!id)return true;return !!await DB.prepare('SELECT id FROM wiki_folders WHERE id=?').bind(id).first()}
 async function validateAssetRefs(DB,docId,blocks){const ids=[...new Set(JSON.parse(blocks).flatMap(b=>b.type==='image'?[b.assetId]:b.type==='gallery'?b.assetIds:[]))];for(const id of ids){const r=await DB.prepare('SELECT id FROM wiki_assets WHERE id=? AND doc_id=?').bind(id,docId).first();if(!r)return false}return true}
 const docRow=d=>({...d,tags:JSON.parse(d.tags_json||'[]'),blocks:JSON.parse(d.blocks_json||'[]')});
-export async function handleWiki(request,env,route){
+export async function handleWiki(request,env,route,validatedGateRole=null){
+ if(!env.DB)return j({error:'D1 DB 바인딩(DB)이 설정되지 않았습니다.'},503);
  const method=request.method;
  if(!env.WIKI_SESSION_SECRET)return j({error:'WIKI_SESSION_SECRET 환경변수 설정이 필요합니다.'},503);
  const parts=route.split('/').filter(Boolean);const action=parts[0]||'';
  try{
   if(action==='session'&&method==='GET'){
-   const member=await currentMember(request,env);
+   const member=await currentMember(request,env,validatedGateRole);
+   if(!member)return authError();
    return j({member:publicMember(member),needsSetup:false,canSetup:false,mediaReady:!!env.WIKI_MEDIA});
   }
   // Shared roles are authenticated by the global site gate. Legacy user account APIs are disabled.
   if(['setup','login','logout','password','members'].includes(action))return notFound();
-  const member=await currentMember(request,env);if(!member)return authError();
+  const member=await currentMember(request,env,validatedGateRole);if(!member)return authError();
   if(action==='search'&&method==='GET'){
    const raw=bounded(new URL(request.url).searchParams.get('q'),100);if(!raw)return j({docs:[]});
    const pattern='%'+raw.toLowerCase().replace(/[\%_]/g,c=>'\\'+c)+'%';

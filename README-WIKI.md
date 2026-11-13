@@ -1,3 +1,17 @@
+# PIA v0.3.44 — 위키 입장 인증 연결 수정
+
+**실제 사용자 증상:** 사이트 비밀번호 입력 후 위키에서 `입장 인증 확인 필요`가 나타남. v0.3.43의 `public/wiki.js`는 `/api/wiki/session`의 `member:null` 응답에서 이 메시지를 표시함. 해당 응답이 나온 플랫폼 내부 원인은 아직 확정되지 않았음.
+
+**변경 내용:** `functions/_middleware.js`가 사이트 인증 직후 `/api/wiki/*` 요청을 같은 인증 컨텍스트에서 처리하도록 수정. `functions/_utils/gate.js`는 서버 검증된 role을 미들웨어에 전달하며, `functions/_utils/wiki.js`는 서버에서 전달된 인증 결과를 사용. 이 경로가 누락되어도 API 자체가 서명된 쿠키를 독립 검증하므로, 인증 실패 시 데이터가 노출되지는 않음. 비로그인 요청의 `/api/wiki/session`은 더 이상 `member:null` 200으로 답하지 않고 401을 반환함.
+
+**배포:** 기존 v0.3.43 소스를 기준으로 패치 파일을 원래 위치에 덮어쓰기. Cloudflare Pages Functions의 **Production** 배포 후 동일 주소에서 비밀번호로 다시 입장. 필요한 Secret/DB 변경 및 D1 SQL 추가 작업 **없음**. 패치 적용 전에 현재 GitHub `main`의 변경분과 충돌이 없는지 확인.
+
+**검증 단계:** ① 시크릿 창에서 사이트 접속 → 비밀번호 입력, ② `/api/gate/session`에 `authenticated:true`가 표시되는지, ③ `/api/wiki/session`에서 `member.role:"owner"`가 표시되는지, ④ 위키 메인/메뉴 작성 및 기존 `/x.html` 화면 확인. **쿠키·비밀번호·시크릿 키는 공유하지 말 것.** ②만 성공하고 ③이 실패하면 두 요청의 상태코드와 민감값을 가린 JSON 결과만 확인해야 함.
+
+**검증 범위:** `node tests/wiki.test.mjs`, `node tests/wiki-gate-integration.test.mjs`, `node tests/wiki-no-loop.test.mjs`, 기존 X Node 테스트, JS 문법 검사. 로컬 모의 테스트이며 운영 환경에서 해결되는지는 배포 후 확인 필요.
+
+---
+
 # PIA v0.3.43 — 초기 진입 무한 새로고침 긴급 수정
 
 - **기준 파일**: 이 대화의 v0.3.42 전체 소스. 운영 GitHub의 최신 커밋과 직접 비교하지는 않았습니다.
