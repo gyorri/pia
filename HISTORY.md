@@ -1,3 +1,18 @@
+## v0.3.42 — 단일 공통 비밀번호로 진입 단순화
+- v0.3.41에 필수였던 열람/편집/관리자 공통 비밀번호 3개를 `PIA_ACCESS_PASSWORD` 하나로 축소(입력 최소 8자). Cloudflare의 시스템상 12자 제한이 아닌 사이트 코드 정책이었음을 정정.
+- 입장자는 위키에 대한 전체 읽기·작성·수정·삭제·복원 권한을 가짐. X의 관리자 작업은 기존 `ADMIN_PASSWORD`로 별도 유지. 개인별 수정자 추적이 불가능함을 문서에 명시.
+- 기존 X·위키 스키마/데이터/UI 유지. 쿠키 서명 문자열을 `gate-v2`로 분리해 기존 3역할 쿠키 무효화 및 비밀번호 변경 시 이전 로그인 무효화.
+- D1 마이그레이션 없음. R2는 이미지 직접 업로드에만 필요. 비밀번호 추측 방지용 서버 측 시도 횟수 제한은 아직 미구현.
+- `tests/wiki.test.mjs`를 단일 키 방식으로 보완하고 기존 회귀 테스트를 재확인. GitHub 실제 운영 배포 및 프로덕션 D1/R2 실사용 검증은 별도.
+
+## v0.3.41 — 사이트 전체 입장 게이트 + 위키 공용 권한
+- 네트워크 경계 보호: Cloudflare Pages root `functions/_middleware.js`와 `public/_routes.json`을 추가해 위키, 기존 X 페이지, 관리 보조 페이지, JS/CSS, `/api/data` 등을 서버 측 비밀번호 검사 뒤에만 전달.
+- 개인 위키 계정·관리자 최초 생성·멤버 관리/비밀번호 변경 화면 및 API 비활성화. 3개 독립 공통 비밀번호(열람·편집·관리자) + 기존 `WIKI_SESSION_SECRET` 서명 쿠키(기본 30일, 선택 해제 12시간)로 전환. 기존 X 관리 인증은 그대로 보존.
+- 위키 D1 스키마/자료 삭제 없음. 새 SQL 실행 없음. 이미지 R2 사용 옵션 그대로 보존. 기존 `wiki_assets` 이미지 업로드 INSERT에 누락된 `object_key` 바인딩을 수정하고 업로드 테스트로 검증.
+- 계정 제거로 위키 `created_by`, `updated_by` 참조는 신규 문서에서 NULL로 저장하며 기존 기록은 유지. UI 작성자 표시는 `공동 작성`으로 대체. 역할별 비밀번호 회전 시 관련 쿠키 무효화.
+- 복귀 및 테스트: Node 위키 API/게이트 인증 및 X 리그레션 검증; 기존 원본부터 실패한 review-quick-duplicate 테스트 1개 동일. Cloudflare 실제 배포/모바일 운영 실사용은 미확인.
+- Cloudflare Pages Free Functions 제한에 대비해 **Fail closed** 권장. 로그인 횟수 제한은 미구현; 필요시 WAF/Rate limiting 추가.
+
 ## v0.3.40 — Cloudflare 위키 계정 생성 PBKDF2 상한 오류 수정
 - 운영 Pages Functions 로그 확인: `NotSupportedError: Pbkdf2 failed: iteration counts above 100000 are not supported (requested 120000)`로 첫 관리자 생성이 HTTP 500으로 실패함.
 - `functions/_utils/wiki.js` 공통 비밀번호 해시 반복 횟수를 Cloudflare Workers에서 허용하는 100,000회로 변경. 첫 계정 생성·로그인·멤버 초대·비밀번호 변경 모두 같은 함수를 사용.

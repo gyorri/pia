@@ -1,5 +1,6 @@
+import {readGateRole} from './gate.js';
 /* Private group wiki for Cloudflare Pages Functions + D1 + private R2.
-   Independent wiki-member auth: never grants access to PIA X administration. */
+   Shared passwords are verified by the site gate; X admin auth remains separate. */
 const j=(data,status=200,headers={})=>new Response(JSON.stringify(data),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff',...headers}});
 const uid=()=>crypto.randomUUID();
 const toHex=bytes=>Array.from(new Uint8Array(bytes),x=>x.toString(16).padStart(2,'0')).join('');
@@ -11,11 +12,10 @@ const kinds=['general','person','x','instagram','postype','report','chat','link'
 const statuses=['draft','needs_review','source_checked'];
 const imageTypes={'image/jpeg':'jpg','image/png':'png','image/webp':'webp','image/gif':'gif'};
 async function hmac(secret,message){const key=await crypto.subtle.importKey('raw',enc.encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);return toHex(await crypto.subtle.sign('HMAC',key,enc.encode(message)))}
-async function passwordHash(pass,salt){const key=await crypto.subtle.importKey('raw',enc.encode(pass),'PBKDF2',false,['deriveBits']);return toHex(await crypto.subtle.deriveBits({name:'PBKDF2',salt:enc.encode(salt),iterations:100000,hash:'SHA-256'},key,256))}
-function equal(a,b){if(typeof a!=='string'||typeof b!=='string'||a.length!==b.length)return false;let diff=0;for(let i=0;i<a.length;i++)diff|=a.charCodeAt(i)^b.charCodeAt(i);return diff===0}
-async function currentMember(req,env){if(!env.WIKI_SESSION_SECRET)return null;const cookie=(req.headers.get('cookie')||'').match(/(?:^|;\s*)pia_wiki_session=([^;]+)/);if(!cookie)return null;let token;try{token=decodeURIComponent(cookie[1])}catch{return null}const p=token.split('.');if(p.length!==4||!/^[a-f0-9-]{36}$/.test(p[0])||!/^\d{13}$/.test(p[1])||Number(p[1])<=Date.now()||!/^\d+$/.test(p[2]))return null;const m=await env.DB.prepare('SELECT id,username,display_name,role,session_version FROM wiki_members WHERE id=? AND active=1').bind(p[0]).first();if(!m||Number(p[2])!==m.session_version)return null;const sig=await hmac(env.WIKI_SESSION_SECRET,`${p[0]}.${p[1]}.${p[2]}`);return equal(p[3],sig)?m:null}
-const cookie=(value,maxAge)=>`pia_wiki_session=${value}; HttpOnly; Secure; SameSite=Strict; Path=/api/wiki; Max-Age=${maxAge}`;
-async function sessionCookie(member,secret){const exp=String(Date.now()+7*86400e3);const part=`${member.id}.${exp}.${member.session_version||1}`;return cookie(`${part}.${await hmac(secret,part)}`,604800)}
+async function currentMember(req,env){
+ const role=await readGateRole(req,env);
+ return role?{id:null,username:'shared_member',display_name:'모임 구성원',role}:null;
+}
 const publicMember=m=>m?{id:m.id,username:m.username,name:m.display_name,role:m.role}:null;
 const readBody=async req=>{if(Number(req.headers.get('content-length')||0)>280000)return null;const txt=await req.text();if(txt.length>280000)return null;try{return JSON.parse(txt)}catch{return null}};
 const authError=()=>j({error:'위키 로그인 후 이용할 수 있습니다.'},401);
@@ -40,33 +40,12 @@ export async function handleWiki(request,env,route){
  const parts=route.split('/').filter(Boolean);const action=parts[0]||'';
  try{
   if(action==='session'&&method==='GET'){
-   const member=await currentMember(request,env);const num=await env.DB.prepare('SELECT COUNT(*) AS n FROM wiki_members').first();return j({member:publicMember(member),needsSetup:Number(num?.n||0)===0,canSetup:!!env.WIKI_SETUP_KEY,mediaReady:!!env.WIKI_MEDIA});
+   const member=await currentMember(request,env);
+   return j({member:publicMember(member),needsSetup:false,canSetup:false,mediaReady:!!env.WIKI_MEDIA});
   }
-  if(action==='setup'&&method==='POST'){
-   if(!env.WIKI_SETUP_KEY)return j({error:'WIKI_SETUP_KEY 설정이 필요합니다.'},503);
-   const count=await env.DB.prepare('SELECT COUNT(*) AS n FROM wiki_members').first();if(count?.n>0)return j({error:'첫 관리자 설정이 이미 완료되었습니다.'},409);
-   const b=await readBody(request);if(!b||!equal(String(b.setupKey||''),env.WIKI_SETUP_KEY))return j({error:'초기 설정 키가 올바르지 않습니다.'},403);
-   const name=bounded(b.displayName,60),username=bounded(b.username,30).toLowerCase(),pass=b.password;
-   if(!name||!/^[a-z0-9_]{3,30}$/.test(username)||typeof pass!=='string'||pass.length<10||pass.length>128)return j({error:'표시 이름, 영문 아이디(3~30자), 비밀번호(10자 이상)를 확인하세요.'},400);
-   const id=uid(),salt=uid(),hash=await passwordHash(pass,salt);
-   await env.DB.prepare('INSERT INTO wiki_members(id,username,display_name,password_salt,password_hash,role) VALUES(?,?,?,?,?,?)').bind(id,username,name,salt,hash,'owner').run();
-   return j({member:{id,username,name,role:'owner'}},200,{'set-cookie':await sessionCookie({id,session_version:1},env.WIKI_SESSION_SECRET)});
-  }
-  if(action==='login'&&method==='POST'){
-   const b=await readBody(request);const username=bounded(b?.username,30).toLowerCase(),pass=b?.password;
-   if(!username||typeof pass!=='string'||pass.length>128)return j({error:'로그인 정보를 확인하세요.'},400);
-   const m=await env.DB.prepare('SELECT * FROM wiki_members WHERE username=? AND active=1').bind(username).first();
-   if(!m||!equal(await passwordHash(pass,m.password_salt),m.password_hash))return j({error:'아이디 또는 비밀번호를 확인하세요.'},401);
-   return j({member:publicMember(m)},200,{'set-cookie':await sessionCookie(m,env.WIKI_SESSION_SECRET)});
-  }
-  if(action==='logout'&&method==='POST')return j({ok:true},200,{'set-cookie':cookie('',0)});
+  // Shared roles are authenticated by the global site gate. Legacy user account APIs are disabled.
+  if(['setup','login','logout','password','members'].includes(action))return notFound();
   const member=await currentMember(request,env);if(!member)return authError();
-  if(action==='password'&&method==='POST'){
-   const b=await readBody(request);if(typeof b?.oldPassword!=='string'||typeof b?.newPassword!=='string'||b.newPassword.length<10||b.newPassword.length>128)return j({error:'현재 비밀번호와 10자 이상의 새 비밀번호를 확인하세요.'},400);
-   const m=await env.DB.prepare('SELECT password_salt,password_hash FROM wiki_members WHERE id=?').bind(member.id).first();if(!equal(await passwordHash(b.oldPassword,m.password_salt),m.password_hash))return j({error:'현재 비밀번호가 올바르지 않습니다.'},403);
-   const salt=uid(),hash=await passwordHash(b.newPassword,salt);await env.DB.prepare('UPDATE wiki_members SET password_salt=?,password_hash=?,session_version=session_version+1 WHERE id=?').bind(salt,hash,member.id).run();
-   const updated=await env.DB.prepare('SELECT id,session_version FROM wiki_members WHERE id=?').bind(member.id).first();return j({ok:true},200,{'set-cookie':await sessionCookie(updated,env.WIKI_SESSION_SECRET)});
-  }
   if(action==='search'&&method==='GET'){
    const raw=bounded(new URL(request.url).searchParams.get('q'),100);if(!raw)return j({docs:[]});
    const pattern='%'+raw.toLowerCase().replace(/[\%_]/g,c=>'\\'+c)+'%';
@@ -76,23 +55,6 @@ export async function handleWiki(request,env,route){
   if(action==='data'&&method==='GET'){
    const [fr,dr]=await Promise.all([env.DB.prepare('SELECT id,parent_id,title,position,created_at FROM wiki_folders ORDER BY position,created_at').all(),env.DB.prepare(`SELECT d.id,d.folder_id,d.title,d.kind,d.status,d.source_url,d.event_date,d.tags_json,d.revision,d.created_at,d.updated_at,m.display_name AS updated_name FROM wiki_docs d LEFT JOIN wiki_members m ON d.updated_by=m.id WHERE d.deleted_at IS NULL ORDER BY d.updated_at DESC LIMIT 1500`).all()]);
    return j({folders:fr.results,docs:dr.results.map(d=>({...d,tags:JSON.parse(d.tags_json||'[]')})),member:publicMember(member)});
-  }
-  if(action==='members'){
-   if(!ownerOnly(member))return permissionError();
-   if(method==='GET'){const r=await env.DB.prepare('SELECT id,username,display_name,role,active,created_at FROM wiki_members ORDER BY created_at').all();return j({members:r.results})}
-   if(method==='POST'){
-    const b=await readBody(request);if(!b)return j({error:'잘못된 요청입니다.'},400);
-    const username=bounded(b.username,30).toLowerCase(),name=bounded(b.displayName,60),role=roles.includes(b.role)&&b.role!=='owner'?b.role:'editor';
-    if(!name||!/^[a-z0-9_]{3,30}$/.test(username)||typeof b.password!=='string'||b.password.length<10||b.password.length>128)return j({error:'아이디, 이름 또는 초기 비밀번호를 확인하세요.'},400);
-    const salt=uid(),hash=await passwordHash(b.password,salt),id=uid();
-    await env.DB.prepare('INSERT INTO wiki_members(id,username,display_name,password_salt,password_hash,role) VALUES(?,?,?,?,?,?)').bind(id,username,name,salt,hash,role).run();return j({id});
-   }
-   if(method==='PATCH'&&parts[1]){
-    const b=await readBody(request),role=b?.role,active=b?.active;
-    if((role!==undefined&&!['editor','viewer'].includes(role))||(active!==undefined&&typeof active!=='boolean'))return j({error:'역할이나 활성화 값을 확인하세요.'},400);
-    const target=await env.DB.prepare('SELECT id,role FROM wiki_members WHERE id=?').bind(parts[1]).first();if(!target)return notFound();if(target.role==='owner')return j({error:'소유자 계정은 변경할 수 없습니다.'},403);
-    await env.DB.prepare('UPDATE wiki_members SET role=COALESCE(?,role),active=COALESCE(?,active) WHERE id=?').bind(role||null,active===undefined?null:active?1:0,parts[1]).run();return j({ok:true});
-   }
   }
   if(action==='folder'){
    if(method==='POST'){
@@ -118,7 +80,7 @@ export async function handleWiki(request,env,route){
     const id=uid();await env.DB.prepare(`INSERT INTO wiki_docs(id,folder_id,title,kind,status,source_url,event_date,tags_json,blocks_json,created_by,updated_by) VALUES(?,?,?,?,?,?,?,?,?,?,?)`).bind(id,p.folderId,p.title,p.kind,p.status,p.source,p.date,p.tags,p.blocks,member.id,member.id).run();return j({id,revision:1});
    }
    const id=parts[1];if(!id)return notFound();const d=await env.DB.prepare('SELECT * FROM wiki_docs WHERE id=?').bind(id).first();if(!d)return notFound();
-   if(method==='GET'){if(d.deleted_at)return notFound();const assets=await env.DB.prepare('SELECT id,filename,mime_type,size_bytes,created_at FROM wiki_assets WHERE doc_id=? ORDER BY created_at').bind(id).all();const owner=await env.DB.prepare('SELECT display_name FROM wiki_members WHERE id=?').bind(d.updated_by).first();return j({doc:{...docRow(d),updated_name:owner?.display_name||'알 수 없음'},assets:assets.results})}
+   if(method==='GET'){if(d.deleted_at)return notFound();const assets=await env.DB.prepare('SELECT id,filename,mime_type,size_bytes,created_at FROM wiki_assets WHERE doc_id=? ORDER BY created_at').bind(id).all();const owner=await env.DB.prepare('SELECT display_name FROM wiki_members WHERE id=?').bind(d.updated_by).first();return j({doc:{...docRow(d),updated_name:owner?.display_name||'공동 작성'},assets:assets.results})}
    if(method==='PUT'){
     if(!canEdit(member))return permissionError();if(d.deleted_at)return notFound();const b=await readBody(request);if(!b)return j({error:'잘못된 요청입니다.'},400);const p=docPayload(b,true);if(p.error)return j({error:p.error},400);if(!Number.isInteger(p.revision)||p.revision<1)return j({error:'문서 버전이 필요합니다.'},400);
     if(!await folderExists(env.DB,p.folderId))return j({error:'메뉴가 존재하지 않습니다.'},400);if(!await validateAssetRefs(env.DB,id,p.blocks))return j({error:'다른 문서의 이미지가 포함되어 있습니다.'},400);
@@ -144,7 +106,7 @@ export async function handleWiki(request,env,route){
     if(file.size>10*1024*1024||file.size===0)return j({error:'이미지는 한 장에 최대 10MB까지 가능합니다.'},413);
     const fileId=uid(),key=`wiki/${id}/${fileId}.${extension}`;
     await env.WIKI_MEDIA.put(key,await file.arrayBuffer(),{httpMetadata:{contentType:file.type}});
-    try{await env.DB.prepare('INSERT INTO wiki_assets(id,doc_id,object_key,filename,mime_type,size_bytes,created_by) VALUES(?,?,?,?,?,?,?)').bind(fileId,id,bounded(file.name||'image',200),file.type,file.size,member.id).run()}catch(e){await env.WIKI_MEDIA.delete(key);throw e}
+    try{await env.DB.prepare('INSERT INTO wiki_assets(id,doc_id,object_key,filename,mime_type,size_bytes,created_by) VALUES(?,?,?,?,?,?,?)').bind(fileId,id,key,bounded(file.name||'image',200),file.type,file.size,member.id).run()}catch(e){await env.WIKI_MEDIA.delete(key);throw e}
     return j({id:fileId,url:`/api/wiki/assets/${fileId}`,name:bounded(file.name||'image',200)});
    }
    if(method==='GET'&&parts[1]){

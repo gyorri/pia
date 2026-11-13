@@ -1,3 +1,15 @@
+# PIA v0.3.42 — 사이트 입장 비밀번호 1개로 단순화
+
+새 위키와 X 아카이브 모두 **`PIA_ACCESS_PASSWORD` 하나로 입장**합니다. 모든 입장자는 위키를 읽고/편집하고/휴지통을 복원할 수 있습니다. 기존 X의 게시물·계정 관리자 작업은 기존 `ADMIN_PASSWORD` 인증을 계속 사용합니다. 친구별 계정 생성과 3개 역할 비밀번호는 필요하지 않습니다. 비밀번호는 8자 이상 설정하되 충분히 추측하기 어려운 값을 사용하세요. 기존 `WIKI_SESSION_SECRET`, D1 `DB` 및 X 설정은 유지합니다. **새 SQL/마이그레이션 없음.** 반드시 `functions/_middleware.js`와 `public/_routes.json`을 포함해 배포하고, 상세 내용은 `README-WIKI.md`를 확인하세요. 
+
+---
+
+# PIA v0.3.41 — 처음 접속할 때 공통 비밀번호만 입력
+
+사이트 전체(`/`, X `/x.html`, 기존 X 작업 페이지, API)를 비밀번호로 보호합니다. 개인 계정·회원가입 없이 **열람 / 위키 편집 / 위키 관리자** 3가지 공통 비밀번호로 역할을 구분합니다. Cloudflare Production에 `PIA_VIEW_PASSWORD`, `PIA_EDIT_PASSWORD`, `PIA_OWNER_PASSWORD` 세 Secret을 추가하고, 기존 `WIKI_SESSION_SECRET`, `ADMIN_PASSWORD`, `DB`는 유지하세요. 새 D1 마이그레이션은 없습니다. 반드시 `public/_routes.json`과 `functions/_middleware.js`까지 배포하세요. 상세 안내는 `README-WIKI.md` 참고.
+
+---
+
 # PIA v0.3.40 — 첫 위키 관리자 생성 실패 수정
 
 Cloudflare Pages Functions 로그에서 PBKDF2 반복 횟수 120,000이 Workers 상한 100,000을 초과해 `/api/wiki/setup`이 실패하는 원인을 확인했습니다. `functions/_utils/wiki.js`의 공통 암호 해시 반복 횟수를 100,000으로 수정했습니다. D1 테이블, R2, X 화면 및 기존 X 데이터를 변경하지 않습니다. 상세 안내는 `README-WIKI.md`를 확인하세요.
