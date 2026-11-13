@@ -295,3 +295,5 @@ button:disabled{cursor:default}
   .shell .tweet.tweet-detail .twhead .name,
   .shell .tweet.tweet-detail .twhead .handle{max-width:100%}
 }
+/* Separate PIA wiki entry point; keep X layout intact. */
+.shell .nav a.pia-wiki-nav{background:color-mix(in srgb,var(--blue) 9%,var(--bg));font-weight:650}

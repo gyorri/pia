@@ -1,0 +1,34 @@
+import { DatabaseSync } from 'node:sqlite';
+import fs from 'node:fs';
+import assert from 'node:assert/strict';
+import { handleWiki } from '../functions/_utils/wiki.js';
+
+const db=new DatabaseSync(':memory:');
+db.exec(fs.readFileSync(new URL('../migration-v0.3.39-wiki.sql',import.meta.url),'utf8'));
+const DB={prepare(sql){let args=[];return {bind(...a){args=a;return this},async first(){return db.prepare(sql).get(...args)||null},async all(){return {results:db.prepare(sql).all(...args)}},async run(){const result=db.prepare(sql).run(...args);return {meta:{changes:result.changes}}}}}};
+const files=new Map();
+const WIKI_MEDIA={async put(key,data){files.set(key,new Uint8Array(data))},async get(key){const body=files.get(key);return body?{body}:null},async delete(key){files.delete(key)}};
+const env={DB,WIKI_MEDIA,WIKI_SESSION_SECRET:'session-'+('very-random-secret'.repeat(4)),WIKI_SETUP_KEY:'init-'+('very-random-secret'.repeat(4))};
+let cookie='';
+async function call(path,method='GET',data=null,cookieOverride=cookie){const request=new Request('https://example.test/api/wiki/'+path,{method,headers:cookieOverride?{cookie:cookieOverride}:{},body:data===null?undefined:JSON.stringify(data)});const response=await handleWiki(request,env,path.split('?')[0]);const payload=await response.json();const c=response.headers.get('set-cookie');if(c&&cookieOverride===cookie)cookie=c.split(';')[0];return {status:response.status,payload,response}}
+let r=await call('session');assert.equal(r.payload.member,null);assert.equal(r.payload.needsSetup,true);
+r=await call('data');assert.equal(r.status,401);
+r=await call('setup','POST',{setupKey:env.WIKI_SETUP_KEY,displayName:'모임장',username:'owner_1',password:'initialPassword#1'});assert.equal(r.status,200);assert(cookie.startsWith('pia_wiki_session='));
+r=await call('session');assert.equal(r.payload.member.role,'owner');
+r=await call('members','POST',{username:'member_1',displayName:'친구A',password:'memberPassword#1',role:'editor'});assert.equal(r.status,200);const memberId=r.payload.id;
+r=await call('folder','POST',{title:'SNS 증빙 자료'});assert.equal(r.status,200);const folderId=r.payload.id;
+r=await call('doc','POST',{folderId,title:'원본 기록',kind:'x',sourceUrl:'https://x.com/example/status/1',blocks:[{type:'text',text:'공개 게시물 원문 요약'}]});assert.equal(r.status,200);const docId=r.payload.id;
+r=await call('doc/'+docId);assert.equal(r.payload.doc.title,'원본 기록');assert.equal(r.payload.doc.revision,1);
+let imgForm=new FormData();imgForm.append('file',new Blob([new Uint8Array([255,216,255,217])],{type:'image/jpeg'}),'sample.jpg');
+let request=new Request('https://example.test/api/wiki/assets?docId='+docId,{method:'POST',headers:{cookie},body:imgForm});let response=await handleWiki(request,env,'assets');let imageResult=await response.json();assert.equal(response.status,200);assert(imageResult.id);
+r=await call('doc/'+docId,'PUT',{title:'원본 기록 수정',kind:'x',status:'needs_review',folderId,sourceUrl:'https://x.com/example/status/1',blocks:[{id:crypto.randomUUID(),type:'text',text:'매우 특별한 희귀 단어 검색 테스트'},{id:crypto.randomUUID(),type:'gallery',assetIds:[imageResult.id],caption:'캡처'}],tags:['SNS'],revision:1});assert.equal(r.status,200);assert.equal(r.payload.revision,2);
+r=await call('doc/'+docId,'PUT',{title:'오래된 편집',kind:'x',folderId,revision:1,blocks:[]});assert.equal(r.status,409);assert.equal(r.payload.conflict,true);
+r=await call('search?q='+encodeURIComponent('희귀 단어'));assert.equal(r.status,200);assert.equal(r.payload.docs.length,1);
+r=await call('doc/'+docId);assert.equal(r.payload.doc.blocks[1].type,'gallery');
+r=await call('doc/'+docId,'DELETE');assert.equal(r.status,200);r=await call('doc/'+docId);assert.equal(r.status,404);
+r=await call('trash');assert.equal(r.payload.docs.length,1);
+r=await call('doc/'+docId+'/restore','POST',{});assert.equal(r.status,200);r=await call('doc/'+docId);assert.equal(r.status,200);
+r=await call('password','POST',{oldPassword:'initialPassword#1',newPassword:'newPassword#456'});assert.equal(r.status,200);
+r=await call('members/'+memberId,'PATCH',{active:false});assert.equal(r.status,200);
+r=await call('data','GET',null,'');assert.equal(r.status,401);
+console.log('PASS: session/login setup, members, folder, doc, private upload, gallery, search, conflict, trash/restore, password, authorization.');
