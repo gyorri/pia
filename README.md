@@ -1,3 +1,9 @@
+# PIA v0.3.43 — 입장 깜빡임 방지 패치
+
+v0.3.42의 비밀번호 1개 방식과 기존 X/위키 데이터를 유지합니다. 위키 세션 실패 시 무한 새로고침이 발생하지 않도록 수정하고, 로그인 쿠키를 검증한 후 이동하게 했습니다. `public/index.html`(위키 JS 캐시 버전 갱신)과 `public/wiki.js`, `functions/_utils/gate.js`를 기존 경로대로 함께 적용해야 합니다. **DB 마이그레이션·Cloudflare 시크릿 변경 불필요**. 상세 내용은 `README-WIKI.md` 참조.
+
+---
+
 # PIA v0.3.42 — 사이트 입장 비밀번호 1개로 단순화
 
 새 위키와 X 아카이브 모두 **`PIA_ACCESS_PASSWORD` 하나로 입장**합니다. 모든 입장자는 위키를 읽고/편집하고/휴지통을 복원할 수 있습니다. 기존 X의 게시물·계정 관리자 작업은 기존 `ADMIN_PASSWORD` 인증을 계속 사용합니다. 친구별 계정 생성과 3개 역할 비밀번호는 필요하지 않습니다. 비밀번호는 8자 이상 설정하되 충분히 추측하기 어려운 값을 사용하세요. 기존 `WIKI_SESSION_SECRET`, D1 `DB` 및 X 설정은 유지합니다. **새 SQL/마이그레이션 없음.** 반드시 `functions/_middleware.js`와 `public/_routes.json`을 포함해 배포하고, 상세 내용은 `README-WIKI.md`를 확인하세요. 
