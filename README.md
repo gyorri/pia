@@ -1,3 +1,34 @@
+# PIA v0.3.46 — KV 사진 첨부 (R2 결제 등록 불필요)
+
+**기준본**: 이 대화에서 전달한 v0.3.45 전체 소스. 사진 저장 기능과 사용자 요청에 따른 첫 화면 문구 축소만 변경했습니다. 기존 X, 공통 비밀번호 로그인, 위키 D1 스키마/문서 및 블록 형식은 그대로 유지합니다.
+
+## Cloudflare에서 한 번만 설정
+
+1. Cloudflare 대시보드에서 **Storage & Databases → KV** 로 이동 → 새 Namespace 생성 (예: `pia-wiki-images`). Workers KV Free 플랜이 사용 가능한 계정이어야 합니다. 결제 카드를 요구하는 화면은 진행하지 않아도 됩니다.
+2. **Workers & Pages → PIA Pages 프로젝트 → Settings → Bindings → Add → KV namespace** → 생성한 namespace 선택, **Variable name에 정확히 `WIKI_MEDIA_KV`** 입력.
+3. **Production**에 바인딩이 적용되었는지 확인하고 **다시 배포**. 기존의 `PIA_ACCESS_PASSWORD`, `WIKI_SESSION_SECRET`, `ADMIN_PASSWORD`, D1 바인딩 `DB`는 변경하지 마세요.
+4. 사이트에서 입장 후 새 문서를 열어 사진을 첨부 → 새로고침 후 같은 사진이 보이는지 확인. `/api/wiki/session`의 `mediaReady`가 `true`, `mediaBackend`가 `"kv"`인지 확인해도 됩니다. 로그아웃 후 사진 URL이 HTTP 401로 차단되는지도 확인하세요.
+
+**R2를 새로 만들거나 결제 정보를 등록할 필요 없습니다. 새 D1 SQL 마이그레이션도 없습니다.** `WIKI_MEDIA_KV`는 Secret/문자열이 아닌 **KV Namespace binding**입니다. 정상 바인딩 전에 사진 업로드를 시도하면 오류 안내를 보여줍니다.
+
+## 저장 설계 및 기존 이미지 호환
+
+- 새로운 파일은 KV `kv/wiki/{문서ID}/{파일ID}.{확장자}`에 저장합니다. D1의 `wiki_assets.object_key`는 같은 컬럼을 사용합니다. 이 `kv/` 접두어로 기존 R2 객체를 구분합니다.
+- 기존에 R2 사진을 저장했다면, 읽기에 한하여 구 R2 `WIKI_MEDIA` 바인딩을 유지해야 합니다. 기존 이미지 자동 이전은 수행하지 않습니다. R2를 사용한 적이 없다면 `WIKI_MEDIA`가 필요 없습니다.
+- 파일은 JPG/PNG/WebP/GIF만 허용하며 파일당 기존과 동일하게 10MiB(10×1024×1024바이트) 제한을 유지합니다. KV 자체의 최대 값은 25MiB입니다.
+- 이미지 원본을 공개된 KV URL에 직접 연결하지 않고, **사이트 비밀번호 확인 후** `/api/wiki/assets/{id}` 요청으로만 전달합니다. 개인자료나 사적 대화는 권한과 동의, 가림처리도 확인하세요.
+- KV는 eventual consistency(최종 일관성) 구조라 업로드 직후 다른 네트워크 위치에서는 이미지 표시가 지연될 수 있습니다. 프런트엔드는 실패한 이미지 요청을 제한적으로 다시 시도하며 페이지 전체를 새로고침하지 않습니다.
+- Cloudflare 공식 Free 한도(2026-10-30 기준): 저장 1GB/계정, 하루 읽기 100,000회, 다른 키 쓰기 하루 1,000회. 유료 구독 활성화 없이 Free 한도 내에서 사용하되 한도 초과 시 업로드 실패가 발생할 수 있습니다. 실제 사용 가능 여부는 계정별로 확인하세요.
+- 삭제된 문서는 기존과 같이 휴지통에 남으며 KV 이미지도 자동 삭제하지 않습니다(복원 보존). 용량 정리·백업 정책은 별도로 필요합니다. 기존 R2 이미지 자료를 자동 이동/삭제하지 않습니다.
+
+## 검증/배포
+
+`node tests/wiki.test.mjs`, `node tests/wiki-kv.test.mjs`, `node tests/wiki-gate-integration.test.mjs`, `node tests/wiki-no-loop.test.mjs` 및 기존 X 테스트를 실행하세요. 테스트는 KV 모의 객체와 로컬 SQLite 기반이며 **실제 Cloudflare KV·D1 Production에 대한 실배포 검증은 하지 않았습니다**.
+
+**GitHub 적용**: Patch ZIP 내부 파일을 저장소 최상위에 원래 경로로 업로드합니다. 기존 소스가 v0.3.45보다 새 버전이라면 덮어쓰기 전에 비교하세요.
+
+---
+
 # PIA v0.3.45 — 위키 글쓰기 단순화
 
 위키 편집 화면을 **제목 → 테마·원본 주소(선택) → 본문** 순서로 재구성했습니다. 새 자료는 제목만으로 빠르게 만들 수 있으며, 본문 작성 중 글/사진을 해당 문단 아래에 삽입할 수 있습니다. 자료 유형·상태·날짜·태그는 접힌 상세 설정에 그대로 보존했습니다. 기존 위키 블록 JSON, X 화면, 로그인, DB/R2/API는 변경하지 않습니다. 상세는 `README-WIKI.md` 참조.

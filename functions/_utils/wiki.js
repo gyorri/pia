@@ -1,5 +1,5 @@
 import {readGateRole} from './gate.js';
-/* Private group wiki for Cloudflare Pages Functions + D1 + private R2.
+/* Private group wiki for Cloudflare Pages Functions + D1 + private KV image storage.
    Shared passwords are verified by the site gate; X admin auth remains separate. */
 const j=(data,status=200,headers={})=>new Response(JSON.stringify(data),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff',...headers}});
 const uid=()=>crypto.randomUUID();
@@ -45,7 +45,7 @@ export async function handleWiki(request,env,route,validatedGateRole=null){
   if(action==='session'&&method==='GET'){
    const member=await currentMember(request,env,validatedGateRole);
    if(!member)return authError();
-   return j({member:publicMember(member),needsSetup:false,canSetup:false,mediaReady:!!env.WIKI_MEDIA});
+   return j({member:publicMember(member),needsSetup:false,canSetup:false,mediaReady:!!(env.WIKI_MEDIA_KV||env.WIKI_MEDIA),mediaBackend:env.WIKI_MEDIA_KV?'kv':env.WIKI_MEDIA?'r2':null});
   }
   // Shared roles are authenticated by the global site gate. Legacy user account APIs are disabled.
   if(['setup','login','logout','password','members'].includes(action))return notFound();
@@ -101,20 +101,46 @@ export async function handleWiki(request,env,route,validatedGateRole=null){
    if(!ownerOnly(member))return permissionError();const r=await env.DB.prepare('SELECT id,title,deleted_at FROM wiki_docs WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC LIMIT 100').all();return j({docs:r.results});
   }
   if(action==='assets'){
-   if(!env.WIKI_MEDIA)return j({error:'WIKI_MEDIA(R2 버킷) 바인딩이 필요합니다.'},503);
+   // Prefer Workers KV for new images. Preserve read access to older R2 assets,
+   // whose database object keys have no "kv/" prefix.
+   const kv=env.WIKI_MEDIA_KV;
    if(method==='POST'){
-    if(!canEdit(member))return permissionError();const id=bounded(new URL(request.url).searchParams.get('docId'),80);const d=await env.DB.prepare('SELECT id FROM wiki_docs WHERE id=? AND deleted_at IS NULL').bind(id).first();if(!d)return notFound();
+    if(!canEdit(member))return permissionError();
+    if(!kv&&!env.WIKI_MEDIA)return j({error:'사진 저장소 연결이 필요합니다. Cloudflare Pages에 KV 바인딩 WIKI_MEDIA_KV를 추가하세요.'},503);
+    const id=bounded(new URL(request.url).searchParams.get('docId'),80);
+    const d=await env.DB.prepare('SELECT id FROM wiki_docs WHERE id=? AND deleted_at IS NULL').bind(id).first();if(!d)return notFound();
     if(Number(request.headers.get('content-length')||0)>11*1024*1024)return j({error:'이미지는 한 장에 최대 10MB까지 가능합니다.'},413);
-    const data=await request.formData().catch(()=>null),file=data?.get('file');if(!file||typeof file.arrayBuffer!=='function')return j({error:'이미지 파일을 선택하세요.'},400);
+    const data=await request.formData().catch(()=>null),file=data?.get('file');
+    if(!file||typeof file.arrayBuffer!=='function')return j({error:'이미지 파일을 선택하세요.'},400);
     const extension=imageTypes[file.type];if(!extension)return j({error:'JPG, PNG, WebP, GIF만 지원합니다. HEIC는 JPG로 변환해 주세요.'},415);
     if(file.size>10*1024*1024||file.size===0)return j({error:'이미지는 한 장에 최대 10MB까지 가능합니다.'},413);
-    const fileId=uid(),key=`wiki/${id}/${fileId}.${extension}`;
-    await env.WIKI_MEDIA.put(key,await file.arrayBuffer(),{httpMetadata:{contentType:file.type}});
-    try{await env.DB.prepare('INSERT INTO wiki_assets(id,doc_id,object_key,filename,mime_type,size_bytes,created_by) VALUES(?,?,?,?,?,?,?)').bind(fileId,id,key,bounded(file.name||'image',200),file.type,file.size,member.id).run()}catch(e){await env.WIKI_MEDIA.delete(key);throw e}
+    const fileId=uid(),key=(kv?'kv/':'')+`wiki/${id}/${fileId}.${extension}`;
+    const binary=await file.arrayBuffer();
+    try{
+     if(kv)await kv.put(key,binary);
+     else await env.WIKI_MEDIA.put(key,binary,{httpMetadata:{contentType:file.type}});
+    }catch(error){console.error('wiki image storage error',error);return j({error:'이미지를 저장하지 못했습니다. KV 연결 상태와 무료 저장 용량을 확인해 주세요.'},503)}
+    try{
+     await env.DB.prepare('INSERT INTO wiki_assets(id,doc_id,object_key,filename,mime_type,size_bytes,created_by) VALUES(?,?,?,?,?,?,?)').bind(fileId,id,key,bounded(file.name||'image',200),file.type,file.size,member.id).run();
+    }catch(error){
+     try{if(kv)await kv.delete(key);else await env.WIKI_MEDIA.delete(key)}catch(cleanup){console.error('wiki image rollback error',cleanup)}
+     throw error;
+    }
     return j({id:fileId,url:`/api/wiki/assets/${fileId}`,name:bounded(file.name||'image',200)});
    }
    if(method==='GET'&&parts[1]){
-    const a=await env.DB.prepare('SELECT a.object_key,a.mime_type FROM wiki_assets a JOIN wiki_docs d ON a.doc_id=d.id WHERE a.id=? AND d.deleted_at IS NULL').bind(parts[1]).first();if(!a)return notFound();const obj=await env.WIKI_MEDIA.get(a.object_key);if(!obj)return notFound();return new Response(obj.body,{headers:{'content-type':a.mime_type,'cache-control':'private, no-store','x-content-type-options':'nosniff','content-security-policy':"default-src 'none'; sandbox"}})
+    const a=await env.DB.prepare('SELECT a.object_key,a.mime_type FROM wiki_assets a JOIN wiki_docs d ON a.doc_id=d.id WHERE a.id=? AND d.deleted_at IS NULL').bind(parts[1]).first();
+    if(!a)return notFound();
+    let binary;
+    if(a.object_key.startsWith('kv/')){
+     if(!kv)return j({error:'WIKI_MEDIA_KV 바인딩이 필요합니다.'},503);
+     binary=await kv.get(a.object_key,'arrayBuffer');
+    }else{
+     if(!env.WIKI_MEDIA)return j({error:'기존 R2 이미지 저장소가 연결되지 않았습니다.'},503);
+     const obj=await env.WIKI_MEDIA.get(a.object_key);binary=obj?.body;
+    }
+    if(!binary)return notFound();
+    return new Response(binary,{headers:{'content-type':a.mime_type,'cache-control':'private, no-store','x-content-type-options':'nosniff','content-security-policy':"default-src 'none'; sandbox"}});
    }
   }
   return j({error:'위키 요청을 찾을 수 없습니다.'},404);
