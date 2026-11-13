@@ -1,3 +1,10 @@
+## v0.3.40 — Cloudflare 위키 계정 생성 PBKDF2 상한 오류 수정
+- 운영 Pages Functions 로그 확인: `NotSupportedError: Pbkdf2 failed: iteration counts above 100000 are not supported (requested 120000)`로 첫 관리자 생성이 HTTP 500으로 실패함.
+- `functions/_utils/wiki.js` 공통 비밀번호 해시 반복 횟수를 Cloudflare Workers에서 허용하는 100,000회로 변경. 첫 계정 생성·로그인·멤버 초대·비밀번호 변경 모두 같은 함수를 사용.
+- `tests/wiki.test.mjs`에서 운영 Workers의 PBKDF2 상한을 모의 강제하는 테스트 추가. 사용자 비밀번호 해시는 여전히 개인별 salt + PBKDF2-SHA256으로 저장; 향후 보안 강화(별도 pepper/고급 KDF) 검토 필요.
+- D1 스키마·R2 바인딩·환경변수·X 기능·기존 자료와 화면은 변경하지 않음. 기존 마이그레이션 재실행 불필요.
+- 새 소스 배포 후 관리자 생성을 다시 시도해야 하며, 실제 Cloudflare 운영 배포 및 계정 생성 성공은 사용자 측 확인 필요.
+
 ## v0.3.39 — 비공개 모임 위키 추가 · 기존 X 타임라인 분리
 - `/`를 개인별 위키 계정 로그인이 필요한 테마 자료실로 변경. 기존 X 타임라인의 동작·해시 라우팅을 `/x.html`로 보존하고 주요 X 관리 링크를 수정.
 - 테마별 메뉴, 자료 유형, 자유 블록/원본 링크/체크리스트/이미지 갤러리, 모바일 사진·카메라 첨부, 검색, 자동 저장·버전 충돌 확인, 휴지통·복원 구현.

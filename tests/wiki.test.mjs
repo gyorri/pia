@@ -3,6 +3,31 @@ import fs from 'node:fs';
 import assert from 'node:assert/strict';
 import { handleWiki } from '../functions/_utils/wiki.js';
 
+// Cloudflare Workers production limits every PBKDF2 deriveBits call to 100,000 rounds.
+// Node's Web Crypto does not enforce that limit, so model it in this regression test.
+const nativeCrypto=globalThis.crypto;
+let pbkdf2Calls=0;
+const limitedSubtle=new Proxy(nativeCrypto.subtle,{
+ get(target,prop){
+  const value=Reflect.get(target,prop,target);
+  if(prop==='deriveBits')return async (algorithm,...args)=>{
+   if(algorithm?.name==='PBKDF2'){
+    pbkdf2Calls++;
+    assert.ok(algorithm.iterations<=100000,`Cloudflare Workers rejects ${algorithm.iterations} PBKDF2 iterations`);
+   }
+   return value.call(target,algorithm,...args);
+  };
+  return typeof value==='function'?value.bind(target):value;
+ }
+});
+Object.defineProperty(globalThis,'crypto',{configurable:true,value:new Proxy(nativeCrypto,{
+ get(target,prop){
+  if(prop==='subtle')return limitedSubtle;
+  const value=Reflect.get(target,prop,target);
+  return typeof value==='function'?value.bind(target):value;
+ }
+})});
+
 const db=new DatabaseSync(':memory:');
 db.exec(fs.readFileSync(new URL('../migration-v0.3.39-wiki.sql',import.meta.url),'utf8'));
 const DB={prepare(sql){let args=[];return {bind(...a){args=a;return this},async first(){return db.prepare(sql).get(...args)||null},async all(){return {results:db.prepare(sql).all(...args)}},async run(){const result=db.prepare(sql).run(...args);return {meta:{changes:result.changes}}}}}};
@@ -29,6 +54,10 @@ r=await call('doc/'+docId,'DELETE');assert.equal(r.status,200);r=await call('doc
 r=await call('trash');assert.equal(r.payload.docs.length,1);
 r=await call('doc/'+docId+'/restore','POST',{});assert.equal(r.status,200);r=await call('doc/'+docId);assert.equal(r.status,200);
 r=await call('password','POST',{oldPassword:'initialPassword#1',newPassword:'newPassword#456'});assert.equal(r.status,200);
+r=await call('logout','POST',{});assert.equal(r.status,200);
+r=await call('login','POST',{username:'owner_1',password:'newPassword#456'});assert.equal(r.status,200);
+r=await call('session');assert.equal(r.payload.member.role,'owner');
 r=await call('members/'+memberId,'PATCH',{active:false});assert.equal(r.status,200);
 r=await call('data','GET',null,'');assert.equal(r.status,401);
+assert.ok(pbkdf2Calls>=4,'password creation, member registration, change and login must be checked against the Worker limit');
 console.log('PASS: session/login setup, members, folder, doc, private upload, gallery, search, conflict, trash/restore, password, authorization.');
